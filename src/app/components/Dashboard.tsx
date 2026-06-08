@@ -185,17 +185,13 @@ export default function Dashboard() {
                 <div className="relative hidden sm:block">
                   <div className="h-8 w-8 rounded-full border border-signal/30 bg-signal/10 animate-pulse" />
                   <div className="absolute inset-0 flex items-center justify-center">
-                    <svg viewBox="0 0 40 26" className="w-6" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      {/* Body core */}
-                      <path d="M20 6 L23 10 L26 8 L29 11 L32 9 L36 13 L33 15 L30 13 L28 16 L24 14 L22 18 L20 16 L18 18 L16 14 L12 16 L10 13 L7 15 L4 13 L8 9 L11 11 L14 8 L17 10 Z" fill="rgba(255,42,42,0.85)" />
-                      {/* Left wing tip */}
-                      <path d="M4 13 L0 10 L3 8 L5 11 L4 13Z" fill="rgba(255,42,42,0.6)" />
-                      {/* Right wing tip */}
-                      <path d="M36 13 L40 10 L37 8 L35 11 L36 13Z" fill="rgba(255,42,42,0.6)" />
-                      {/* Head / ears */}
-                      <path d="M17 8 L18 4 L20 6 L22 4 L23 8" fill="rgba(255,42,42,0.9)" />
-                      {/* Glow */}
-                      <path d="M20 6 L23 10 L26 8 L29 11 L32 9 L36 13 L33 15 L30 13 L28 16 L24 14 L22 18 L20 16 L18 18 L16 14 L12 16 L10 13 L7 15 L4 13 L8 9 L11 11 L14 8 L17 10 Z" fill="none" stroke="rgba(255,42,42,0.25)" strokeWidth="1.5" />
+                    <svg viewBox="0 0 187.059 187.059" 
+                    className="w-6 h-6drop-shadow-[0_0_8px_rgba(255,42,42,0.7)]"
+                    xmlns="http://www.w3.org/2000/svg"
+                    >
+                      <path d="M94.406,146.118c0,0,20.569-43.123,58.889-46.039c-0.262-3.715,3.373-32.008,33.765-59.02c-5.286,1.589-50.687,18.194-50.687,18.194s-9.511,21.711-20.618,35.217c-1.193,1.649-6.637,3.659-8.086,0.262c-1.114-2.569-3.057-19.004-3.057-22.983c0.268,0.268-10.261,22.533-20.298-0.055c0.262,3.44-1.404,16.392-2.643,20.919c-1.814,6.649-6.08,4.238-8.187,1.583c-2.116-2.648-17.598-17.813-20.77-36.352C47.425,56.255,0,40.94,0,40.94s33.177,30.188,32.385,59.053C34.501,100.261,67.982,101.089,94.406,146.118z"
+                            fill="rgba(255,42,42,0.9)"
+                    />
                     </svg>
                   </div>
                 </div>
