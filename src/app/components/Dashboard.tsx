@@ -8,6 +8,7 @@ import StatePanel from "./StatePanel";
 import CountermeasurePanel from "./CountermeasurePanel";
 import CommandCenter from "./CommandCenter";
 import IntelligencePanel from "./IntelligencePanel";
+import DataVaultPanel from "./DataVaultPanel";
 import type { DailyStateLog } from "@/lib/state-detection";
 import { localStateDetectionRepository } from "@/lib/state-detection";
 import { recommendCountermeasure } from "@/lib/countermeasures";
@@ -70,8 +71,8 @@ export default function Dashboard() {
     [todaysDate, offsetDays]
   );
 
-  // Layout mode
-  const [activeMode, setActiveMode] = useState<"deployment" | "intelligence">("deployment");
+  // Layout mode — deployment | intelligence | vault
+  const [activeMode, setActiveMode] = useState<"deployment" | "intelligence" | "vault">("deployment");
 
   // Audio system state
   const [audioMuted, setAudioMuted] = useState(true);
@@ -180,11 +181,21 @@ export default function Dashboard() {
               custom={0}
             >
               <div className="flex flex-wrap items-center gap-4">
+              {/* Custom bat emblem — futuristic angular silhouette */}
                 <div className="relative hidden sm:block">
                   <div className="h-8 w-8 rounded-full border border-signal/30 bg-signal/10 animate-pulse" />
                   <div className="absolute inset-0 flex items-center justify-center">
-                    <svg viewBox="0 0 24 12" className="w-5" fill="rgba(255,42,42,0.8)">
-                      <path d="M12 1 C10.5 1 9.5 3 8.5 4.5 C7.5 3.5 5.5 2.5 3.5 3 C4.5 4.5 5 6 5.5 7 C3.5 6.5 1.5 7 0.5 9 C2.5 8.5 4.5 9 6.5 10 C5.5 11.5 4.5 12 3.5 12.5 C5.5 11.5 7.5 11 9.5 10.5 C10 11.5 10.5 12 12 13 C13.5 12 14 11.5 14.5 10.5 C16.5 11 18.5 11.5 20.5 12.5 C19.5 12 18.5 11.5 17.5 10 C19.5 9 21.5 8.5 23.5 9 C22.5 7 20.5 6.5 18.5 7 C19 6 19.5 4.5 20.5 3 C18.5 2.5 16.5 3.5 15.5 4.5 C14.5 3 13.5 1 12 1Z" />
+                    <svg viewBox="0 0 40 26" className="w-6" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      {/* Body core */}
+                      <path d="M20 6 L23 10 L26 8 L29 11 L32 9 L36 13 L33 15 L30 13 L28 16 L24 14 L22 18 L20 16 L18 18 L16 14 L12 16 L10 13 L7 15 L4 13 L8 9 L11 11 L14 8 L17 10 Z" fill="rgba(255,42,42,0.85)" />
+                      {/* Left wing tip */}
+                      <path d="M4 13 L0 10 L3 8 L5 11 L4 13Z" fill="rgba(255,42,42,0.6)" />
+                      {/* Right wing tip */}
+                      <path d="M36 13 L40 10 L37 8 L35 11 L36 13Z" fill="rgba(255,42,42,0.6)" />
+                      {/* Head / ears */}
+                      <path d="M17 8 L18 4 L20 6 L22 4 L23 8" fill="rgba(255,42,42,0.9)" />
+                      {/* Glow */}
+                      <path d="M20 6 L23 10 L26 8 L29 11 L32 9 L36 13 L33 15 L30 13 L28 16 L24 14 L22 18 L20 16 L18 18 L16 14 L12 16 L10 13 L7 15 L4 13 L8 9 L11 11 L14 8 L17 10 Z" fill="none" stroke="rgba(255,42,42,0.25)" strokeWidth="1.5" />
                     </svg>
                   </div>
                 </div>
@@ -222,6 +233,17 @@ export default function Dashboard() {
                     }`}
                   >
                     Intelligence
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { audioManager.playClick(); setActiveMode("vault"); }}
+                    className={`px-3 py-1.5 font-display text-xs uppercase tracking-wider transition-all duration-200 ${
+                      activeMode === "vault"
+                        ? "border border-emerald-400/40 bg-emerald-400/10 text-emerald-400"
+                        : "text-white/40 hover:text-white/70"
+                    }`}
+                  >
+                    Data Vault
                   </button>
                 </div>
 
@@ -400,7 +422,7 @@ export default function Dashboard() {
                     />
                   </motion.div>
                 </motion.div>
-              ) : (
+              ) : activeMode === "intelligence" ? (
                 <motion.div
                   key="intelligence"
                   initial={{ opacity: 0, y: 15 }}
@@ -413,6 +435,17 @@ export default function Dashboard() {
                     todaysDate={todaysDate}
                     refreshKey={refreshKey}
                   />
+                </motion.div>
+              ) : (
+                <motion.div
+                  key="vault"
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -15 }}
+                  transition={{ duration: 0.4 }}
+                  className="flex flex-1 min-h-0"
+                >
+                  <DataVaultPanel />
                 </motion.div>
               )}
             </AnimatePresence>

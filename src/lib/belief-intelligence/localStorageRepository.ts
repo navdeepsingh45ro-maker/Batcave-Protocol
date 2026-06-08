@@ -70,6 +70,14 @@ export const beliefRepo = {
     } as BeliefEntry;
     items.push(entry);
     writeJson(BELIEF_STORAGE_KEY, items);
+
+    // Auto-snapshot after every check-in (fire and forget, no circular dep)
+    if (typeof window !== "undefined") {
+      import("@/lib/storage/manager").then(({ createSnapshot }) => {
+        createSnapshot("After check-in");
+      }).catch(() => {});
+    }
+
     return entry;
   },
   clear() {
