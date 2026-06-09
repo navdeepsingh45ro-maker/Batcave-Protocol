@@ -38,35 +38,51 @@ function writeJson<T>(key: string, items: T[]) {
   window.localStorage.setItem(key, JSON.stringify(items));
 }
 
-/** Backfill old V1 entries missing recurringThought/archived fields */
+/** Backfill old entries — V1 + V2 + V4.1 migration */
 function migrateDecisions(items: DecisionMatrixEntry[]): DecisionMatrixEntry[] {
   return items.map((d) => ({
     ...d,
-    recurringThought: d.recurringThought ?? null,
-    archivedEvidence: d.archivedEvidence ?? [],
-    archived: d.archived ?? false,
+    recurringThought:    d.recurringThought    ?? null,
+    archivedEvidence:   d.archivedEvidence     ?? [],
+    archived:           d.archived             ?? false,
+    newEmpoweringBelief: d.newEmpoweringBelief  ?? null,  // V4.1
+  }));
+}
+
+/** Backfill old BeliefEntry records for V4.1 fields */
+function migrateBeliefEntries(items: BeliefEntry[]): BeliefEntry[] {
+  return items.map((b) => ({
+    ...b,
+    // dominantThought aliases the old recurringThought field
+    dominantThought: b.dominantThought ?? b.recurringThought ?? null,
+    // Entries without thoughtType: if thought present → unknown (treat as null so UI doesn't show wrong classification)
+    thoughtType: b.thoughtType ?? null,
   }));
 }
 
 export const beliefRepo = {
   list(): BeliefEntry[] {
-    return readJson<BeliefEntry>(BELIEF_STORAGE_KEY);
+    return migrateBeliefEntries(readJson<BeliefEntry>(BELIEF_STORAGE_KEY));
   },
   create(input: CreateBeliefEntryInput): BeliefEntry {
     const items = readJson<BeliefEntry>(BELIEF_STORAGE_KEY);
-    const id = generateId();
+    const id  = generateId();
     const now = nowISO();
+    // dominantThought is V4.1; recurringThought is legacy alias
+    const dominantThought = input.dominantThought ?? input.recurringThought ?? null;
     const entry: BeliefEntry = {
       id,
-      date: input.date,
-      time: input.time,
-      states: input.states,
-      primaryCause: input.primaryCause ?? null,
-      recurringThought: input.recurringThought ?? null,
-      notes: input.notes,
-      metadata: input.metadata,
-      createdAt: now,
-      updatedAt: now,
+      date:            input.date,
+      time:            input.time,
+      states:          input.states,
+      primaryCause:    input.primaryCause ?? null,
+      dominantThought,
+      recurringThought: dominantThought,   // legacy alias kept for old analytics
+      thoughtType:     input.thoughtType  ?? null,
+      notes:           input.notes,
+      metadata:        input.metadata,
+      createdAt:       now,
+      updatedAt:       now,
     } as BeliefEntry;
     items.push(entry);
     writeJson(BELIEF_STORAGE_KEY, items);
@@ -92,18 +108,19 @@ export const decisionRepo = {
 
   create(input: CreateDecisionInput): DecisionMatrixEntry {
     const items = this.list();
-    const id = generateId();
+    const id  = generateId();
     const now = nowISO();
     const entry: DecisionMatrixEntry = {
       id,
-      recurringThought: input.recurringThought ?? null,
-      limitingBelief: input.limitingBelief,
-      newDecision: input.newDecision,
-      evidence: input.evidence ?? [],
-      archivedEvidence: [],
-      archived: false,
-      createdAt: now,
-      updatedAt: now,
+      recurringThought:    input.recurringThought    ?? null,
+      limitingBelief:      input.limitingBelief,
+      newDecision:         input.newDecision,
+      newEmpoweringBelief: input.newEmpoweringBelief ?? null,  // V4.1
+      evidence:            input.evidence            ?? [],
+      archivedEvidence:    [],
+      archived:            false,
+      createdAt:           now,
+      updatedAt:           now,
     } as DecisionMatrixEntry;
     items.push(entry);
     writeJson(DECISION_STORAGE_KEY, items);
@@ -117,10 +134,11 @@ export const decisionRepo = {
     const existing = items[idx];
     items[idx] = {
       ...existing,
-      ...(input.recurringThought !== undefined ? { recurringThought: input.recurringThought } : {}),
-      ...(input.limitingBelief !== undefined ? { limitingBelief: input.limitingBelief } : {}),
-      ...(input.newDecision !== undefined ? { newDecision: input.newDecision } : {}),
-      ...(input.archived !== undefined ? { archived: input.archived } : {}),
+      ...(input.recurringThought    !== undefined ? { recurringThought:    input.recurringThought    } : {}),
+      ...(input.limitingBelief      !== undefined ? { limitingBelief:      input.limitingBelief      } : {}),
+      ...(input.newDecision         !== undefined ? { newDecision:         input.newDecision         } : {}),
+      ...(input.newEmpoweringBelief !== undefined ? { newEmpoweringBelief: input.newEmpoweringBelief } : {}),
+      ...(input.archived            !== undefined ? { archived:            input.archived            } : {}),
       updatedAt: nowISO(),
     };
     writeJson(DECISION_STORAGE_KEY, items);

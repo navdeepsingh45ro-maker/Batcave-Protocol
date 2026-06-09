@@ -24,6 +24,9 @@ export type BeliefCause =
   | "Identity Conflict"
   | "Other";
 
+// ── V4.1: Thought classification ─────────────────────────────
+export type ThoughtType = "strengthening" | "limiting" | "neutral";
+
 export interface BeliefEntry {
   id: string;
   userId?: string;
@@ -31,6 +34,11 @@ export interface BeliefEntry {
   time?: string;
   states: BeliefState[];
   primaryCause: BeliefCause | null;
+  /** V4.1: renamed from recurringThought — the dominant thought of the session */
+  dominantThought?: string | null;
+  /** V4.1: "strengthening" | "limiting" | "neutral" */
+  thoughtType?: ThoughtType | null;
+  /** Legacy alias — kept for migration compatibility */
   recurringThought?: string | null;
   notes?: string;
   source?: "quick-checkin" | "manual" | "import" | "system";
@@ -42,12 +50,14 @@ export interface BeliefEntry {
 export interface DecisionMatrixEntry {
   id: string;
   userId?: string;
-  recurringThought: string | null; // V2: the surface-level thought that triggers the belief
+  recurringThought: string | null; // the surface-level thought that triggers the belief
   limitingBelief: string;
   newDecision: string;
-  evidence: string[]; // user-generated evidence only
-  archivedEvidence?: string[]; // soft-deleted evidence kept for history
-  archived?: boolean; // soft-delete the whole entry
+  /** V4.1: empowering belief that replaces the limiting one */
+  newEmpoweringBelief?: string | null;
+  evidence: string[];
+  archivedEvidence?: string[];
+  archived?: boolean;
   metadata?: Record<string, unknown>;
   createdAt: ISODateTime;
   updatedAt: ISODateTime;
@@ -76,9 +86,22 @@ export interface PatternReport {
   totalEntries: number;
   topStates: Array<{ state: BeliefState | string; count: number }>;
   topCauses: Array<{ cause: BeliefCause | string; count: number }>;
-  topThoughts: Array<{ thought: string; count: number }>;
+  topThoughts: Array<{ thought: string; count: number; thoughtType?: ThoughtType | null }>;
+  /** V4.1 */
+  strengtheningThoughts: Array<{ thought: string; count: number }>;
+  limitingThoughts: Array<{ thought: string; count: number }>;
   stateThoughtPairs: PatternCorrelation[];
   stateCausePairs: PatternCorrelation[];
+}
+
+// ── Belief Transformation (V4.1) ─────────────────────────────
+export interface BeliefTransformation {
+  recurringThought: string;
+  limitingBelief: string;
+  newEmpoweringBelief: string;
+  newDecision: string;
+  usageCount: number;
+  decisionId: string;
 }
 
 export interface CreateBeliefEntryInput {
@@ -86,6 +109,9 @@ export interface CreateBeliefEntryInput {
   time?: string;
   states: BeliefState[];
   primaryCause?: BeliefCause | null;
+  dominantThought?: string | null;
+  thoughtType?: ThoughtType | null;
+  /** Legacy alias */
   recurringThought?: string | null;
   notes?: string;
   metadata?: Record<string, unknown>;
@@ -95,6 +121,7 @@ export interface CreateDecisionInput {
   recurringThought?: string | null;
   limitingBelief: string;
   newDecision: string;
+  newEmpoweringBelief?: string | null;
   evidence?: string[];
 }
 
@@ -118,5 +145,6 @@ export interface UpdateDecisionInput {
   recurringThought?: string | null;
   limitingBelief?: string;
   newDecision?: string;
+  newEmpoweringBelief?: string | null;
   archived?: boolean;
 }

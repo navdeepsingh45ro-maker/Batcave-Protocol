@@ -12,8 +12,12 @@ import {
 } from "@/lib/foundation";
 import type { Identity, ISODate } from "@/lib/foundation";
 import { localFoundationRepository } from "@/lib/foundation";
-import { beliefRepo } from "@/lib/belief-intelligence";
-import { generatePatternReport, calculateBeliefCorrelations } from "@/lib/belief-intelligence/calculations";
+import { beliefRepo, decisionRepo, decisionUsageRepo } from "@/lib/belief-intelligence";
+import {
+  generatePatternReport,
+  calculateBeliefCorrelations,
+  generateBeliefTransformations,
+} from "@/lib/belief-intelligence/calculations";
 import { localCountermeasureRepository, calculateCountermeasureEffectiveness } from "@/lib/countermeasures";
 import { THREATS, COUNTERMEASURES } from "@/lib/countermeasures/config";
 
@@ -135,20 +139,33 @@ export default function IntelligencePanel({ todaysDate, refreshKey }: Intelligen
       : `${linePath} L ${points[points.length - 1].x} ${svgHeight - paddingY} L ${points[0].x} ${svgHeight - paddingY} Z`,
     [points, linePath]);
 
-  // ── NEW: Psychological Landscape chains ───────────────────────
+  // ── NEW V4.1: Psychological Landscape chains (with belief status) ─
   const psychChains = useMemo(() => {
-    const map: Record<string, { state: string; cause: string; thought: string; count: number }> = {};
+    const map: Record<string, {
+      state: string; cause: string; thought: string;
+      thoughtType: string | null; count: number;
+    }> = {};
     for (const b of beliefs) {
+      const thought = b.dominantThought ?? b.recurringThought ?? "";
       for (const state of b.states) {
         const cause = b.primaryCause ?? "Unknown";
-        const thought = b.recurringThought ?? "";
-        const key = `${state}||${cause}||${thought}`;
-        if (!map[key]) map[key] = { state, cause, thought, count: 0 };
+        const key   = `${state}||${cause}||${thought}`;
+        if (!map[key]) map[key] = { state, cause, thought, thoughtType: null, count: 0 };
         map[key].count++;
+        // Last known thoughtType wins for this chain
+        if (b.thoughtType) map[key].thoughtType = b.thoughtType;
       }
     }
     return Object.values(map).sort((a, b) => b.count - a.count).slice(0, 6);
   }, [beliefs]);
+
+  // ── NEW V4.1: Belief Transformations ─────────────────────────
+  const beliefTransformations = useMemo(() => {
+    const decisions = decisionRepo.list();
+    const usages    = decisionUsageRepo.list();
+    return generateBeliefTransformations(decisions, usages);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
 
   // ── NEW: Recurring thoughts (full text, no truncation) ────────
   const patternReport = useMemo(() => generatePatternReport(beliefs), [beliefs]);
@@ -373,54 +390,65 @@ export default function IntelligencePanel({ todaysDate, refreshKey }: Intelligen
           </p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {psychChains.map((chain, idx) => (
-              <div key={idx} className="border border-white/5 bg-white/[0.01] p-3 space-y-2">
-                {/* Chain header */}
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-[9px] uppercase tracking-wider text-white/25">
-                    #{idx + 1} Pattern
-                  </span>
-                  <span className="font-display text-sm text-frost">{chain.count}×</span>
-                </div>
+            {psychChains.map((chain, idx) => {
+              const isCool = ["Focused", "Determined", "Calm"].includes(chain.state);
+              const statusColor =
+                chain.thoughtType === "strengthening" ? "text-emerald-400 border-emerald-400/30 bg-emerald-400/5" :
+                chain.thoughtType === "limiting"       ? "text-signal border-signal/30 bg-signal/5" :
+                chain.thoughtType === "neutral"        ? "text-frost/60 border-frost/15 bg-frost/[0.02]" :
+                                                         "text-white/30 border-white/5 bg-transparent";
 
-                {/* State → Cause → Thought chain */}
-                <div className="space-y-1 font-mono text-xs">
-                  <div className="flex items-center gap-2">
-                    <span className={`px-2 py-0.5 border text-[10px] uppercase font-display ${
-                      ["Focused","Determined","Calm"].includes(chain.state)
-                        ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-400"
-                        : "border-signal/30 bg-signal/5 text-signal"
-                    }`}>{chain.state}</span>
+
+              const statusLabel =
+                chain.thoughtType === "strengthening" ? "Strengthening" :
+                chain.thoughtType === "limiting"       ? "Limiting" :
+                chain.thoughtType === "neutral"        ? "Neutral" :
+                                                         "Unclassified";
+
+              return (
+                <div key={idx} className="border border-white/5 bg-white/[0.01] p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-[9px] uppercase tracking-wider text-white/25">#{idx + 1}</span>
+                    <span className="font-display text-sm text-frost">{chain.count}×</span>
                   </div>
-
-                  {chain.cause !== "Unknown" && (
+                  <div className="space-y-1 font-mono text-xs">
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-0.5 border text-[10px] uppercase font-display ${
+                        isCool
+                          ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-400"
+                          : "border-signal/30 bg-signal/5 text-signal"
+                      }`}>{chain.state}</span>
+                    </div>
+                    {chain.cause !== "Unknown" && (
+                      <>
+                        <span className="text-white/20 pl-2 text-[10px]">↓</span>
+                        <div className="pl-2"><span className="text-white/50">{chain.cause}</span></div>
+                      </>
+                    )}
+                    {chain.thought && (
+                      <>
+                        <span className="text-white/20 pl-2 text-[10px]">↓</span>
+                        <div className="pl-2 border-l border-white/8">
+                          <span className="text-frost/80 italic">&quot;{chain.thought}&quot;</span>
+                        </div>
+                      </>
+                    )}
                     <>
                       <span className="text-white/20 pl-2 text-[10px]">↓</span>
                       <div className="pl-2">
-                        <span className="text-white/50">{chain.cause}</span>
+                        <span className={`inline-block px-1.5 py-0.5 border font-mono text-[8px] uppercase tracking-wider ${statusColor}`}>
+                          {statusLabel}
+                        </span>
                       </div>
                     </>
-                  )}
-
-                  {chain.thought && (
-                    <>
-                      <span className="text-white/20 pl-2 text-[10px]">↓</span>
-                      <div className="pl-2 border-l border-white/8">
-                        <span className="text-frost/80 italic">&quot;{chain.thought}&quot;</span>
-                      </div>
-                    </>
-                  )}
-                </div>
-
-                {/* Occurrence bar */}
-                <div>
+                  </div>
                   <MiniBar
                     percent={Math.round((chain.count / Math.max(1, psychChains[0].count)) * 100)}
-                    color={["Focused","Determined","Calm"].includes(chain.state) ? "bg-emerald-500/50" : "bg-signal/50"}
+                    color={isCool ? "bg-emerald-500/50" : "bg-signal/50"}
                   />
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </motion.div>
@@ -504,7 +532,83 @@ export default function IntelligencePanel({ todaysDate, refreshKey }: Intelligen
         )}
       </motion.div>
 
-      {/* ── ROW 5: COUNTERMEASURE EFFECTIVENESS + FOUNDATION CORRELATIONS */}
+      {/* ── ROW 5: STRENGTHENING PATTERNS + BELIEF TRANSFORMATIONS (V4.1) ── */}
+      <motion.div
+        variants={itemVariants}
+        className="panel p-4 lg:col-span-6 bg-black/45 border-white/8 min-h-[200px]"
+      >
+        <div className="mb-3">
+          <p className="font-mono text-[9px] uppercase tracking-[0.24em] text-emerald-400/80">Positive Intelligence</p>
+          <h3 className="font-display text-sm uppercase text-frost">Strengthening Patterns</h3>
+          <p className="font-mono text-[9px] text-white/25 mt-0.5">Thoughts that build you up, by frequency</p>
+        </div>
+
+        {patternReport.strengtheningThoughts.length === 0 ? (
+          <p className="font-mono text-xs text-white/20 py-6 text-center">
+            No strengthening thoughts logged yet.<br />
+            <span className="text-white/15 text-[10px]">Mark a thought as &quot;Strengthening&quot; during check-in.</span>
+          </p>
+        ) : (
+          <div className="space-y-2.5">
+            {patternReport.strengtheningThoughts.slice(0, 6).map((t, idx) => (
+              <div key={idx} className="space-y-1">
+                <div className="flex items-start justify-between gap-3">
+                  <p className="font-mono text-xs text-emerald-400/85 leading-snug flex-1">
+                    &quot;{t.thought}&quot;
+                  </p>
+                  <span className="font-display text-sm text-emerald-400 shrink-0 tabular-nums">{t.count}×</span>
+                </div>
+                <MiniBar
+                  percent={Math.round((t.count / Math.max(1, patternReport.strengtheningThoughts[0].count)) * 100)}
+                  color="bg-emerald-400/55"
+                />
+              </div>
+            ))}
+          </div>
+        )}
+      </motion.div>
+
+      <motion.div
+        variants={itemVariants}
+        className="panel p-4 lg:col-span-6 bg-black/45 border-white/8 min-h-[200px]"
+      >
+        <div className="mb-3">
+          <p className="font-mono text-[9px] uppercase tracking-[0.24em] text-signal/80">Belief Engine</p>
+          <h3 className="font-display text-sm uppercase text-frost">Belief Transformations</h3>
+          <p className="font-mono text-[9px] text-white/25 mt-0.5">Thought → Limiting Belief → Empowering Belief, ranked by use</p>
+        </div>
+
+        {beliefTransformations.length === 0 ? (
+          <p className="font-mono text-xs text-white/20 py-6 text-center">
+            No belief transformations yet.<br />
+            <span className="text-white/15 text-[10px]">Create a matrix entry with a New Empowering Belief.</span>
+          </p>
+        ) : (
+          <div className="space-y-3 overflow-y-auto max-h-[280px] pr-1">
+            {beliefTransformations.slice(0, 5).map((bt, idx) => (
+              <div key={idx} className="border border-white/5 bg-white/[0.01] p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-[9px] uppercase tracking-wider text-white/25">#{idx + 1}</span>
+                  <span className="font-display text-xs text-frost">{bt.usageCount}× used</span>
+                </div>
+                <div className="space-y-1.5 font-mono text-[10px]">
+                  <p className="text-white/60 italic">&quot;{bt.recurringThought}&quot;</p>
+                  <div className="flex items-center gap-1.5 pl-2">
+                    <span className="text-white/20">↓</span>
+                    <span className="text-signal/70">{bt.limitingBelief}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 pl-2">
+                    <span className="text-white/20">↓</span>
+                    <span className="text-emerald-400 font-bold">{bt.newEmpoweringBelief}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </motion.div>
+
+      {/* ── ROW 6: COUNTERMEASURE EFFECTIVENESS + FOUNDATION CORRELATIONS */}
       <motion.div
         variants={itemVariants}
         className="panel p-4 lg:col-span-6 bg-black/45 border-white/8 min-h-[200px]"
