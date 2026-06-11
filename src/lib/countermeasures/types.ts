@@ -10,7 +10,8 @@ export type Need =
   | "Certainty"
   | "Progress"
   | "Relief"
-  | "Stimulation";
+  | "Stimulation"
+  | "Momentum";
 
 export type MissionRedirect = "Primary Mission" | "Secondary Mission" | "Recovery Mission";
 
@@ -19,7 +20,11 @@ export type CountermeasureCategory =
   | "Connection"
   | "Environment Shift"
   | "Digital Control"
-  | "Mission Simplification";
+  | "Mission Simplification"
+  | "Momentum Protection"
+  | "Recovery"
+  | "Anti-Avoidance"
+  | "Custom";
 
 export interface ThreatDefinition {
   id: string;
@@ -154,4 +159,29 @@ export interface CompleteCountermeasureInput {
   completed: boolean;
   notes?: string;
   metadata?: Record<string, unknown>;
+}
+
+// ── V4.4: Custom Countermeasures ─────────────────────────────────
+
+export type CountermeasureSource = "system" | "custom";
+
+export interface CustomCountermeasure {
+  id: string;
+  name: string;
+  description: string;
+  triggerStates: EmotionalState[];
+  triggerCauses: string[];
+  category: string;
+  durationMinutes: number;
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+}
+
+export interface CreateCustomCountermeasureInput {
+  name: string;
+  description: string;
+  triggerStates: EmotionalState[];
+  triggerCauses: string[];
+  category: string;
+  durationMinutes?: number;
 }

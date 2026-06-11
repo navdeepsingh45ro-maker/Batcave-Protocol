@@ -106,12 +106,18 @@ export default function Dashboard() {
     setLatestStateLog(latest);
 
     if (latest && latest.riskScore >= 10) {
-      const cmLogs = localCountermeasureRepository.listLogs();
-      const rec = recommendCountermeasure(
-        { selectedStates: latest.selectedStates, date: activeDate },
-        cmLogs
-      );
-      setRecommendation(rec);
+      // Only run threat / countermeasure pipeline for limiting thought patterns (V4.2)
+      const thoughtType = latest.metadata?.thoughtType ?? null;
+      if (thoughtType === "limiting") {
+        const cmLogs = localCountermeasureRepository.listLogs();
+        const rec = recommendCountermeasure(
+          { selectedStates: latest.selectedStates, date: activeDate },
+          cmLogs
+        );
+        setRecommendation(rec);
+      } else {
+        setRecommendation(null);
+      }
     } else {
       setRecommendation(null);
     }
@@ -136,7 +142,9 @@ export default function Dashboard() {
     (log: DailyStateLog) => {
       refreshStateLogs();
       if (log.riskScore >= 10) {
-        audioManager.playThreatDetected();
+          const thoughtType = log.metadata?.thoughtType ?? null;
+          if (thoughtType === "limiting") audioManager.playThreatDetected();
+          else audioManager.playCheckinComplete();
       } else {
         audioManager.playCheckinComplete();
       }

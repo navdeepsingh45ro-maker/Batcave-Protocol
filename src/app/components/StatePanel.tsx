@@ -2,10 +2,17 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { BELIEF_STATES, BELIEF_CAUSES, SAMPLE_RECURRING_THOUGHTS } from "@/lib/belief-intelligence/config";
-import type { BeliefState, BeliefCause, ThoughtType, DecisionMatrixEntry } from "@/lib/belief-intelligence/types";
+import {
+  POSITIVE_STATES,
+  NEUTRAL_STATES,
+  NEGATIVE_STATES,
+  getStateCategory,
+  getCausesForCategory,
+  getThoughtSuggestions,
+} from "@/lib/belief-intelligence/config";
+import type { BeliefState, BeliefCause, ThoughtType, DecisionMatrixEntry, StateCategory } from "@/lib/belief-intelligence/types";
 import { beliefRepo, decisionRepo, decisionUsageRepo } from "@/lib/belief-intelligence";
-import { detectThreat, detectNeed } from "@/lib/countermeasures";
+import { detectThreat, detectNeed, getMomentumRecommendations } from "@/lib/countermeasures";
 import { localStateDetectionRepository } from "@/lib/state-detection";
 import { localBehavioralTimelineRepository } from "@/lib/behavioral-timeline";
 import { audioManager } from "@/lib/audioManager";
@@ -16,20 +23,33 @@ interface StatePanelProps {
   onStateCheckedIn: (log: DailyStateLog) => void;
 }
 
-// ── State classification ──────────────────────────────────────
-const COOL_STATES = ["Focused", "Determined", "Calm"];
-
 // ── Step definitions ──────────────────────────────────────────
-// Steps: 1=States, 2=Cause, 3=Dominant Thought, 4=Thought Classification, 5=Action
-// Step 5a: if "strengthening/neutral" → positive confirmation
-// Step 5b: if "limiting" → belief system
 const STEP_TITLES = [
-  "Emotional States",
+  "Dominant State",
   "Primary Cause",
   "Dominant Thought",
   "Thought Classification",
   "Response",
 ];
+
+// ── V4.4: State category colors ────────────────────────────────
+const STATE_CATEGORY_STYLE: Record<StateCategory, { selected: string; header: string; dot: string }> = {
+  positive: {
+    selected: "border-emerald-500/40 bg-emerald-500/10 text-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.15)]",
+    header: "text-emerald-400/70",
+    dot: "bg-emerald-400",
+  },
+  neutral: {
+    selected: "border-frost/40 bg-frost/10 text-frost shadow-[0_0_8px_rgba(160,204,255,0.15)]",
+    header: "text-frost/70",
+    dot: "bg-frost",
+  },
+  negative: {
+    selected: "border-signal/40 bg-signal/10 text-signal shadow-[0_0_8px_rgba(255,42,42,0.15)]",
+    header: "text-signal/70",
+    dot: "bg-signal",
+  },
+};
 
 const DRAFT_KEY = "batcave.checkin.draft";
 
@@ -47,7 +67,6 @@ function loadDraft(): CheckInDraft | null {
     const raw = window.localStorage.getItem(DRAFT_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<CheckInDraft>;
-    // Normalise legacy drafts that had recurringThought
     return {
       step:           parsed.step           ?? 1,
       selectedStates: parsed.selectedStates ?? [],
@@ -69,6 +88,7 @@ function clearDraft() {
 export default function StatePanel({ todaysDate, onStateCheckedIn }: StatePanelProps) {
   // ── Restore draft on mount ────────────────────────────────
   const [step, setStep]                     = useState<number>(() => loadDraft()?.step ?? 1);
+  // V4.4: Single dominant state — still array for migration compat
   const [selectedStates, setSelectedStates] = useState<BeliefState[]>(() => loadDraft()?.selectedStates ?? []);
   const [primaryCause, setPrimaryCause]     = useState<BeliefCause | null>(() => loadDraft()?.primaryCause ?? null);
   const [dominantThought, setDominantThought] = useState<string>(() => loadDraft()?.dominantThought ?? "");
@@ -100,25 +120,38 @@ export default function StatePanel({ todaysDate, onStateCheckedIn }: StatePanelP
     if (s !== prevDraft.current) { prevDraft.current = s; saveDraft(draft); }
   }, [step, selectedStates, primaryCause, dominantThought, thoughtType]);
 
-  // ── Step 4 analysis (threat / need) ──────────────────────
+  // ── V4.4: Derive state category from single selection ─────
+  const dominantState: BeliefState | null = selectedStates[0] ?? null;
+  const stateCategory: StateCategory = dominantState ? getStateCategory(dominantState) : "neutral";
+
+  // ── V4.4: Dynamic causes based on state category ──────────
+  const dynamicCauses = useMemo(() => getCausesForCategory(stateCategory), [stateCategory]);
+
+  // ── V4.4: Smart thought suggestions (State + Cause) ───────
+  const thoughtSuggestions = useMemo(() => {
+    return getThoughtSuggestions(dominantState ?? "", primaryCause);
+  }, [dominantState, primaryCause]);
+
+  // ── Step 5 analysis (threat / need) — only for limiting ───
   const analysis = useMemo(() => {
-    if (selectedStates.length === 0) return null;
+    if (selectedStates.length === 0 || thoughtType !== "limiting") return null;
     const threat = detectThreat(selectedStates as any);
     const need   = detectNeed(threat.id);
     return { threat, need, confidence: Math.min(95, 50 + selectedStates.length * 8) };
-  }, [selectedStates]);
+  }, [selectedStates, thoughtType]);
+
+  // ── V4.4: Momentum actions for positive states ────────────
+  const momentumActions = useMemo(() => getMomentumRecommendations(), []);
 
   // ── Decision Matrix match (on dominantThought) ────────────
   const matchedDecision = useMemo(() => {
     const thought = dominantThought.trim().toLowerCase();
     if (!thought) return null;
     const items = decisionRepo.list().filter((d) => !d.archived);
-    // Priority 1: recurringThought field match
     const byThought = items.find((d) =>
       d.recurringThought && d.recurringThought.toLowerCase().includes(thought)
     );
     if (byThought) return byThought;
-    // Priority 2: limitingBelief contains thought (legacy)
     return items.find((d) =>
       d.limitingBelief.toLowerCase().includes(thought) ||
       thought.includes(d.limitingBelief.toLowerCase().substring(0, 10))
@@ -134,6 +167,7 @@ export default function StatePanel({ todaysDate, onStateCheckedIn }: StatePanelP
     beliefRepo.create({
       date:           todaysDate,
       states:         selectedStates,
+      stateCategory,
       primaryCause,
       dominantThought: dominantThought.trim() || null,
       thoughtType,
@@ -142,6 +176,12 @@ export default function StatePanel({ todaysDate, onStateCheckedIn }: StatePanelP
     const stateLog = localStateDetectionRepository.addStateLog({
       date:          todaysDate,
       selectedStates: selectedStates as any,
+      metadata: {
+        stateCategory,
+        thoughtType: thoughtType ?? null,
+        dominantThought: dominantThought.trim() || null,
+        primaryCause: primaryCause ?? null,
+      },
     });
 
     localBehavioralTimelineRepository.addEvent({
@@ -175,6 +215,13 @@ export default function StatePanel({ todaysDate, onStateCheckedIn }: StatePanelP
     // Reset
     setStep(1); setSelectedStates([]); setPrimaryCause(null);
     setDominantThought(""); setThoughtType(null);
+  };
+
+  // ── V4.4: Single state selection handler ──────────────────
+  const handleStateSelect = (state: BeliefState) => {
+    audioManager.playClick();
+    setSelectedStates([state]); // V4.4: single dominant state
+    setPrimaryCause(null);      // Reset cause when state changes
   };
 
   // ── Decision Matrix CRUD ──────────────────────────────────
@@ -215,7 +262,7 @@ export default function StatePanel({ todaysDate, onStateCheckedIn }: StatePanelP
   // ── Thought suggestion click ──────────────────────────────
   const handleThoughtSuggestion = (t: string) => {
     audioManager.playClick();
-    setDominantThought(t === "Other" ? "" : t);
+    setDominantThought(t);
   };
 
   return (
@@ -341,7 +388,7 @@ export default function StatePanel({ todaysDate, onStateCheckedIn }: StatePanelP
         </div>
       ) : (
         /* ══════════════════════════════════════════════════════
-           5-STEP CHECK-IN WIZARD
+           5-STEP CHECK-IN WIZARD (V4.4)
         ══════════════════════════════════════════════════════ */
         <div className="flex-1 flex flex-col min-h-0">
           {/* Progress bar */}
@@ -356,52 +403,127 @@ export default function StatePanel({ todaysDate, onStateCheckedIn }: StatePanelP
           </div>
 
           <div className="flex-1 flex flex-col min-h-0 overflow-y-auto pr-1 space-y-4">
-            {/* ── STEP 1: EMOTIONAL STATES ─────────────────── */}
+            {/* ── STEP 1: SINGLE DOMINANT STATE (V4.4) ───────── */}
             {step === 1 && (
-              <div className="flex flex-wrap gap-2">
-                {BELIEF_STATES.map((state) => {
-                  const isSelected = selectedStates.includes(state);
-                  const isCool     = COOL_STATES.includes(state);
-                  let cls = "border-white/10 bg-white/[0.03] text-white/45 hover:border-white/20";
-                  if (isSelected) cls = isCool
-                    ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.15)]"
-                    : "border-signal/40 bg-signal/10 text-signal shadow-[0_0_8px_rgba(255,42,42,0.15)]";
-                  return (
-                    <button key={state} type="button"
-                      onClick={() => {
-                        audioManager.playClick();
-                        setSelectedStates((p) => p.includes(state) ? p.filter((s) => s !== state) : [...p, state]);
-                      }}
-                      className={`px-3 py-2 font-mono text-xs uppercase border rounded-sm transition-all duration-200 ${cls}`}>
-                      {state}
-                    </button>
-                  );
-                })}
+              <div className="space-y-4">
+                <div className="border border-white/5 bg-black/20 px-3 py-2 space-y-1">
+                  <p className="font-mono text-[9px] text-white/30 uppercase tracking-wider">Dominant State</p>
+                  <p className="font-mono text-[10px] text-white/50 leading-relaxed">
+                    What is your dominant state right now?
+                    <span className="text-white/30 ml-1">Select exactly one.</span>
+                  </p>
+                </div>
+
+                {/* Positive States */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                    <span className="font-mono text-[9px] uppercase tracking-wider text-emerald-400/70">Positive</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {POSITIVE_STATES.map((state) => {
+                      const isSelected = selectedStates[0] === state;
+                      return (
+                        <button key={state} type="button"
+                          onClick={() => handleStateSelect(state)}
+                          className={`px-3 py-2 font-mono text-xs uppercase border rounded-sm transition-all duration-200 ${
+                            isSelected
+                              ? STATE_CATEGORY_STYLE.positive.selected
+                              : "border-white/10 bg-white/[0.03] text-white/45 hover:border-emerald-400/20 hover:text-emerald-400/60"
+                          }`}>
+                          {state}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Neutral States */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-frost" />
+                    <span className="font-mono text-[9px] uppercase tracking-wider text-frost/70">Neutral</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {NEUTRAL_STATES.map((state) => {
+                      const isSelected = selectedStates[0] === state;
+                      return (
+                        <button key={state} type="button"
+                          onClick={() => handleStateSelect(state)}
+                          className={`px-3 py-2 font-mono text-xs uppercase border rounded-sm transition-all duration-200 ${
+                            isSelected
+                              ? STATE_CATEGORY_STYLE.neutral.selected
+                              : "border-white/10 bg-white/[0.03] text-white/45 hover:border-frost/20 hover:text-frost/60"
+                          }`}>
+                          {state}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Negative States */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-signal" />
+                    <span className="font-mono text-[9px] uppercase tracking-wider text-signal/70">Negative</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {NEGATIVE_STATES.map((state) => {
+                      const isSelected = selectedStates[0] === state;
+                      return (
+                        <button key={state} type="button"
+                          onClick={() => handleStateSelect(state)}
+                          className={`px-3 py-2 font-mono text-xs uppercase border rounded-sm transition-all duration-200 ${
+                            isSelected
+                              ? STATE_CATEGORY_STYLE.negative.selected
+                              : "border-white/10 bg-white/[0.03] text-white/45 hover:border-signal/20 hover:text-signal/60"
+                          }`}>
+                          {state}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             )}
 
-            {/* ── STEP 2: PRIMARY CAUSE ────────────────────── */}
+            {/* ── STEP 2: DYNAMIC CAUSES (V4.4) ─────────────── */}
             {step === 2 && (
-              <div className="flex flex-col gap-2">
-                {BELIEF_CAUSES.map((cause) => {
-                  const isSelected = primaryCause === cause;
-                  return (
-                    <button key={cause} type="button"
-                      onClick={() => { audioManager.playClick(); setPrimaryCause(cause); }}
-                      className={`w-full text-left px-3 py-2 border font-mono text-xs uppercase transition-all duration-200 ${isSelected
+              <div className="space-y-3">
+                <div className="border border-white/5 bg-black/20 px-3 py-2">
+                  <p className="font-mono text-[10px] text-white/50">
+                    Why are you feeling{" "}
+                    <span className={stateCategory === "positive" ? "text-emerald-400" : stateCategory === "negative" ? "text-signal" : "text-frost"}>
+                      {dominantState}
+                    </span>?
+                  </p>
+                </div>
+                <div className="flex flex-col gap-2">
+                  {dynamicCauses.map((cause) => {
+                    const isSelected = primaryCause === cause;
+                    const causeColor = stateCategory === "positive"
+                      ? "border-emerald-400/45 bg-emerald-400/10 text-emerald-400"
+                      : stateCategory === "negative"
                         ? "border-signal/45 bg-signal/10 text-signal"
-                        : "border-white/10 bg-white/[0.02] text-white/50 hover:bg-white/5 hover:text-white"}`}>
-                      {cause}
-                    </button>
-                  );
-                })}
+                        : "border-frost/40 bg-frost/10 text-frost";
+                    return (
+                      <button key={cause} type="button"
+                        onClick={() => { audioManager.playClick(); setPrimaryCause(cause); }}
+                        className={`w-full text-left px-3 py-2 border font-mono text-xs uppercase transition-all duration-200 ${isSelected
+                          ? causeColor
+                          : "border-white/10 bg-white/[0.02] text-white/50 hover:bg-white/5 hover:text-white"}`}>
+                        {cause}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             )}
 
-            {/* ── STEP 3: DOMINANT THOUGHT (V4.1) ─────────── */}
+            {/* ── STEP 3: SMART THOUGHT (V4.4: State + Cause) ─ */}
             {step === 3 && (
               <div className="space-y-4">
-                {/* Context copy: no negativity assumption */}
                 <div className="border border-white/5 bg-black/20 px-3 py-2.5 space-y-1">
                   <p className="font-mono text-[9px] text-white/30 uppercase tracking-wider">Dominant Thought</p>
                   <p className="font-mono text-[10px] text-white/50 leading-relaxed">
@@ -409,26 +531,21 @@ export default function StatePanel({ todaysDate, onStateCheckedIn }: StatePanelP
                     <span className="text-white/30">This can be positive, neutral, or negative.</span>
                   </p>
                 </div>
-                <div className="border border-white/5 bg-black/35 p-3">
-                  <textarea
-                    rows={2}
-                    value={dominantThought}
-                    onChange={(e) => setDominantThought(e.target.value)}
-                    placeholder='e.g. "I am making progress", "I need more sleep", "I miss her"'
-                    className="w-full bg-black/40 border border-white/10 px-3 py-2 font-mono text-xs text-white focus:outline-none focus:border-signal/55 resize-none"
-                  />
-                </div>
-                {/* Suggestions */}
+
+                {/* Contextual suggestions: State + Cause */}
                 <div className="space-y-2">
-                  <span className="block font-mono text-[9px] uppercase tracking-wider text-white/25">Quick picks</span>
+                  <div className="flex items-center justify-between">
+                    <span className="font-mono text-[9px] uppercase tracking-wider text-white/25">
+                      Suggestions
+                      {dominantState && primaryCause && (
+                        <span className="text-frost/40 ml-1">
+                          (for {dominantState} + {primaryCause})
+                        </span>
+                      )}
+                    </span>
+                  </div>
                   <div className="flex flex-wrap gap-1.5">
-                    {[
-                      "I am making progress",
-                      "I can do this",
-                      "I need more sleep",
-                      "I need to finish this project",
-                      ...SAMPLE_RECURRING_THOUGHTS.filter((t) => t !== "Other"),
-                    ].map((thought) => (
+                    {thoughtSuggestions.map((thought) => (
                       <button key={thought} type="button"
                         onClick={() => handleThoughtSuggestion(thought)}
                         className={`px-2 py-1.5 border border-white/5 bg-white/[0.02] hover:bg-white/5 font-mono text-[10px] transition-all duration-200 ${
@@ -439,10 +556,25 @@ export default function StatePanel({ todaysDate, onStateCheckedIn }: StatePanelP
                     ))}
                   </div>
                 </div>
+
+                {/* Custom Thought Input */}
+                <div className="border border-white/5 bg-black/35 p-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-[9px] uppercase tracking-wider text-frost/50">✎ Custom Thought</span>
+                    <span className="font-mono text-[8px] text-white/20">Type your own</span>
+                  </div>
+                  <textarea
+                    rows={2}
+                    value={dominantThought}
+                    onChange={(e) => setDominantThought(e.target.value)}
+                    placeholder='e.g. "I am worried about Budget Buddy", "I feel powerful today"'
+                    className="w-full bg-black/40 border border-white/10 px-3 py-2 font-mono text-xs text-white focus:outline-none focus:border-signal/55 resize-none"
+                  />
+                </div>
               </div>
             )}
 
-            {/* ── STEP 4: THOUGHT CLASSIFICATION (V4.1) ───── */}
+            {/* ── STEP 4: THOUGHT CLASSIFICATION ─────────────── */}
             {step === 4 && (
               <div className="space-y-4">
                 {dominantThought.trim() && (
@@ -501,8 +633,58 @@ export default function StatePanel({ todaysDate, onStateCheckedIn }: StatePanelP
               </div>
             )}
 
-            {/* ── STEP 5a: STRENGTHENING / NEUTRAL ────────── */}
-            {step === 5 && thoughtType !== "limiting" && (
+            {/* ── STEP 5a: MOMENTUM MODE (V4.4) ─────────────── */}
+            {step === 5 && stateCategory === "positive" && thoughtType === "strengthening" && (
+              <div className="space-y-4">
+                <div className="border border-emerald-500/30 bg-emerald-500/[0.04] p-4 space-y-4">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <span className="font-display text-lg uppercase text-emerald-400 tracking-wider">
+                      Momentum Detected
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="border border-white/5 bg-black/20 p-2.5">
+                      <span className="block font-mono text-[8px] uppercase tracking-wider text-white/30 mb-1">Current State</span>
+                      <span className="font-mono text-sm text-emerald-400">{dominantState}</span>
+                    </div>
+                    <div className="border border-white/5 bg-black/20 p-2.5">
+                      <span className="block font-mono text-[8px] uppercase tracking-wider text-white/30 mb-1">Direction</span>
+                      <span className="font-mono text-sm text-emerald-400">↗ Positive</span>
+                    </div>
+                  </div>
+
+                  {dominantThought && (
+                    <div className="border border-emerald-500/15 bg-emerald-500/[0.02] px-3 py-2">
+                      <span className="block font-mono text-[8px] uppercase tracking-wider text-emerald-400/40 mb-1">Thought</span>
+                      <p className="font-mono text-xs text-emerald-400/80 italic">&quot;{dominantThought}&quot;</p>
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
+                    <span className="block font-mono text-[9px] uppercase tracking-wider text-white/30">Suggested Actions</span>
+                    {momentumActions.map((action) => (
+                      <div key={action.id} className="flex items-center gap-3 border border-emerald-500/15 bg-emerald-500/[0.02] px-3 py-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400/60" />
+                        <div>
+                          <span className="font-mono text-xs text-emerald-400">{action.name}</span>
+                          <span className="block font-mono text-[9px] text-white/30">{action.description}</span>
+                        </div>
+                        <span className="ml-auto font-mono text-[9px] text-white/20">{action.durationMinutes}m</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <p className="font-mono text-[10px] text-emerald-400/50 text-center border-t border-emerald-500/10 pt-3">
+                    Current trajectory is positive. Protect momentum.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* ── STEP 5b: NEUTRAL / STRENGTHENING (non-positive) ── */}
+            {step === 5 && thoughtType !== "limiting" && !(stateCategory === "positive" && thoughtType === "strengthening") && (
               <div className="space-y-4">
                 <div className={`border p-4 space-y-3 ${
                   thoughtType === "strengthening"
@@ -521,27 +703,17 @@ export default function StatePanel({ todaysDate, onStateCheckedIn }: StatePanelP
                   )}
                   <p className="font-mono text-[10px] text-white/35 leading-relaxed">
                     {thoughtType === "strengthening"
-                      ? "This thought pattern is logged as a strengthening pattern. No belief intervention needed."
-                      : "This thought is stored as a neutral observation."}
+                      ? "This thought pattern is logged as a strengthening pattern. No intervention required."
+                      : "This thought is stored as a neutral observation. No intervention required."}
                   </p>
                 </div>
-
-                {analysis && (
-                  <div className="border border-white/5 bg-black/35 p-3 space-y-2 font-mono text-xs">
-                    <span className="block text-[9px] uppercase tracking-wider text-white/30">State Analysis</span>
-                    <div className="flex justify-between"><span className="text-white/40">Detected Threat</span><span className="text-signal font-bold">{analysis.threat.name}</span></div>
-                    <div className="flex justify-between"><span className="text-white/40">Underlying Need</span><span className="text-frost">{analysis.need.name}</span></div>
-                    <div className="flex justify-between"><span className="text-white/40">Confidence</span><span className="text-frost">{analysis.confidence}%</span></div>
-                  </div>
-                )}
               </div>
             )}
 
-            {/* ── STEP 5b: LIMITING → BELIEF SYSTEM ────────── */}
+            {/* ── STEP 5c: LIMITING → BELIEF SYSTEM ────────────── */}
             {step === 5 && thoughtType === "limiting" && (
               <div className="space-y-4">
                 {matchedDecision ? (
-                  /* ── MATCH FOUND: show full transformation chain ── */
                   <div className="border border-signal/20 bg-signal/[0.02] p-4 space-y-3">
                     <div className="flex justify-between items-center">
                       <span className="font-mono text-[10px] uppercase text-signal tracking-wider">Belief Matrix Match</span>
@@ -571,7 +743,6 @@ export default function StatePanel({ todaysDate, onStateCheckedIn }: StatePanelP
                     )}
                   </div>
                 ) : (
-                  /* ── NO MATCH: seed new belief matrix entry ── */
                   <div className="border border-white/5 bg-black/40 p-4 space-y-3">
                     <p className="font-mono text-xs text-white/40 text-center">
                       No belief match found. Seed a new entry below.

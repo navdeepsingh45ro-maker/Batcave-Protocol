@@ -1,28 +1,64 @@
 export type ISODate = `${number}-${number}-${number}`;
 export type ISODateTime = string;
 
+// ── V4.4: State Categories ──────────────────────────────────────
+export type StateCategory = "positive" | "neutral" | "negative";
+
+// ── V4.4: 15-state focused library ─────────────────────────────
 export type BeliefState =
+  // Positive (5)
   | "Focused"
-  | "Lonely"
+  | "Motivated"
+  | "Confident"
+  | "Energized"
+  | "Calm"
+  // Neutral (4)
+  | "Reflective"
+  | "Curious"
+  | "Recovering"
+  | "Uncertain"
+  // Negative (6)
   | "Heavy"
-  | "Fatigued"
+  | "Lonely"
+  | "Anxious"
   | "Overwhelmed"
+  | "Frustrated"
+  | "Fatigued"
+  // Deprecated aliases (kept for migration of old data)
   | "Determined"
   | "Restless"
-  | "Calm";
+  | "Fired Up";
 
-export type BeliefCause =
+// ── V4.4: Dynamic cause system ──────────────────────────────────
+export type PositiveCause =
+  | "Momentum"
+  | "Recent Progress"
+  | "Mission Progress"
+  | "Productive Session"
+  | "Strong Discipline"
+  | "Physical Energy"
+  | "Clear Direction";
+
+export type NeutralCause =
+  | "Reflection"
+  | "Learning"
+  | "Observation"
+  | "Processing"
+  | "Transition Period"
+  | "Exploration";
+
+export type NegativeCause =
   | "Missing Connection"
   | "Fear Of Failure"
-  | "Purpose Drift"
-  | "Rejection Memory"
   | "Fatigue"
-  | "Uncertainty"
   | "Lack Of Progress"
+  | "Rejection Memory"
   | "Financial Stress"
   | "Social Pressure"
   | "Identity Conflict"
-  | "Other";
+  | "Uncertainty";
+
+export type BeliefCause = PositiveCause | NeutralCause | NegativeCause | "Other";
 
 // ── V4.1: Thought classification ─────────────────────────────
 export type ThoughtType = "strengthening" | "limiting" | "neutral";
@@ -32,9 +68,12 @@ export interface BeliefEntry {
   userId?: string;
   date: ISODate;
   time?: string;
+  /** V4.4: UI enforces single state, but array kept for migration compat */
   states: BeliefState[];
+  /** V4.4: derived from dominant state */
+  stateCategory?: StateCategory;
   primaryCause: BeliefCause | null;
-  /** V4.1: renamed from recurringThought — the dominant thought of the session */
+  /** V4.1: the dominant thought of the session */
   dominantThought?: string | null;
   /** V4.1: "strengthening" | "limiting" | "neutral" */
   thoughtType?: ThoughtType | null;
@@ -50,7 +89,7 @@ export interface BeliefEntry {
 export interface DecisionMatrixEntry {
   id: string;
   userId?: string;
-  recurringThought: string | null; // the surface-level thought that triggers the belief
+  recurringThought: string | null;
   limitingBelief: string;
   newDecision: string;
   /** V4.1: empowering belief that replaces the limiting one */
@@ -108,6 +147,7 @@ export interface CreateBeliefEntryInput {
   date: ISODate;
   time?: string;
   states: BeliefState[];
+  stateCategory?: StateCategory;
   primaryCause?: BeliefCause | null;
   dominantThought?: string | null;
   thoughtType?: ThoughtType | null;

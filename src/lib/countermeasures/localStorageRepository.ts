@@ -1,6 +1,7 @@
-import type { CompleteCountermeasureInput, CountermeasureLog } from "./types";
+import type { CompleteCountermeasureInput, CountermeasureLog, CustomCountermeasure, CreateCustomCountermeasureInput } from "./types";
 
 const COUNTERMEASURE_LOG_STORAGE_KEY = "batcave.countermeasure.logs.v1";
+const CUSTOM_CM_STORAGE_KEY = "batcave.countermeasures.custom";
 
 function now() {
   return new Date().toISOString();
@@ -28,6 +29,7 @@ function writeJson<T>(key: string, value: T) {
 }
 
 export const localCountermeasureRepository = {
+  // ── Standard CM logs ───────────────────────────────────
   listLogs(): CountermeasureLog[] {
     return readJson<CountermeasureLog[]>(COUNTERMEASURE_LOG_STORAGE_KEY, []);
   },
@@ -59,5 +61,33 @@ export const localCountermeasureRepository = {
       existingIndex >= 0 ? logs.map((log, index) => (index === existingIndex ? nextLog : log)) : [...logs, nextLog];
     writeJson(COUNTERMEASURE_LOG_STORAGE_KEY, nextLogs);
     return nextLog;
-  }
+  },
+
+  // ── V4.4: Custom Countermeasures ───────────────────────
+  listCustom(): CustomCountermeasure[] {
+    return readJson<CustomCountermeasure[]>(CUSTOM_CM_STORAGE_KEY, []);
+  },
+
+  createCustom(input: CreateCustomCountermeasureInput): CustomCountermeasure {
+    const customs = this.listCustom();
+    const timestamp = now();
+    const entry: CustomCountermeasure = {
+      id: createId("custom_cm"),
+      name: input.name,
+      description: input.description,
+      triggerStates: input.triggerStates,
+      triggerCauses: input.triggerCauses,
+      category: input.category,
+      durationMinutes: input.durationMinutes ?? 10,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    writeJson(CUSTOM_CM_STORAGE_KEY, [...customs, entry]);
+    return entry;
+  },
+
+  deleteCustom(id: string): void {
+    const customs = this.listCustom().filter((c) => c.id !== id);
+    writeJson(CUSTOM_CM_STORAGE_KEY, customs);
+  },
 };

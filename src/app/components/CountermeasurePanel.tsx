@@ -1,17 +1,20 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { recommendCountermeasureStack } from "@/lib/countermeasures";
 import { localCountermeasureRepository } from "@/lib/countermeasures";
 import type { CountermeasureStackItem } from "@/lib/countermeasures";
+import type { CustomCountermeasure, CreateCustomCountermeasureInput } from "@/lib/countermeasures/types";
 import { beliefRepo } from "@/lib/belief-intelligence";
 import { localFoundationRepository } from "@/lib/foundation";
 import { calculateBeliefCorrelations } from "@/lib/belief-intelligence/calculations";
 import { localBehavioralTimelineRepository } from "@/lib/behavioral-timeline";
 import { audioManager } from "@/lib/audioManager";
+import { POSITIVE_STATES, NEUTRAL_STATES, NEGATIVE_STATES } from "@/lib/belief-intelligence/config";
 import type { ISODate } from "@/lib/foundation";
 import type { DailyStateLog } from "@/lib/state-detection";
+import type { EmotionalState } from "@/lib/state-detection";
 
 interface CountermeasurePanelProps {
   todaysDate: ISODate; // ISODate format
@@ -89,6 +92,81 @@ export default function CountermeasurePanel({
   const [actionedCountermeasures, setActionedCountermeasures] = useState<
     Record<string, "ACCEPTED" | "COMPLETED" | "FAILED" | "SKIPPED">
   >({});
+
+  // ── V4.4: Custom Countermeasure State ──────────────────────────
+  const [customCMs, setCustomCMs] = useState<CustomCountermeasure[]>([]);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [newCM, setNewCM] = useState<{
+    name: string;
+    description: string;
+    category: string;
+    triggerStates: EmotionalState[];
+    triggerCauses: string;
+    durationMinutes: number;
+  }>({
+    name: "",
+    description: "",
+    category: "",
+    triggerStates: [],
+    triggerCauses: "",
+    durationMinutes: 10,
+  });
+
+  const loadCustomCMs = useCallback(() => {
+    setCustomCMs(localCountermeasureRepository.listCustom());
+  }, []);
+
+  useEffect(() => {
+    loadCustomCMs();
+  }, [loadCustomCMs]);
+
+  const handleCreateCustomCM = () => {
+    if (!newCM.name.trim() || !newCM.description.trim()) return;
+    const input: CreateCustomCountermeasureInput = {
+      name: newCM.name.trim(),
+      description: newCM.description.trim(),
+      category: newCM.category.trim() || "Custom",
+      triggerStates: newCM.triggerStates,
+      triggerCauses: newCM.triggerCauses
+        .split(",")
+        .map((c) => c.trim())
+        .filter(Boolean),
+      durationMinutes: newCM.durationMinutes,
+    };
+    localCountermeasureRepository.createCustom(input);
+    audioManager.playClick();
+    setNewCM({
+      name: "",
+      description: "",
+      category: "",
+      triggerStates: [],
+      triggerCauses: "",
+      durationMinutes: 10,
+    });
+    setShowCreateForm(false);
+    loadCustomCMs();
+  };
+
+  const handleDeleteCustomCM = (id: string) => {
+    localCountermeasureRepository.deleteCustom(id);
+    audioManager.playClick();
+    loadCustomCMs();
+  };
+
+  const toggleTriggerState = (state: EmotionalState) => {
+    setNewCM((prev) => ({
+      ...prev,
+      triggerStates: prev.triggerStates.includes(state)
+        ? prev.triggerStates.filter((s) => s !== state)
+        : [...prev.triggerStates, state],
+    }));
+  };
+
+  const getStateChipColor = (state: EmotionalState) => {
+    if ((POSITIVE_STATES as string[]).includes(state)) return "border-emerald-400/40 text-emerald-400";
+    if ((NEUTRAL_STATES as string[]).includes(state)) return "border-warning/40 text-warning";
+    return "border-signal/40 text-signal";
+  };
 
   const isActive = latestStateLog !== null && latestStateLog.riskScore >= 10;
 
@@ -389,6 +467,229 @@ export default function CountermeasurePanel({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* ── V4.4: My Protocols Section ──────────────────────────── */}
+      <div className="mt-4 border border-white/8 bg-black/35 p-3 space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="font-mono text-[10px] uppercase tracking-wider text-white/40">
+            My Protocols ({customCMs.length})
+          </span>
+          <button
+            type="button"
+            onClick={() => { setShowCreateForm((prev) => !prev); audioManager.playClick(); }}
+            className="font-mono text-[9px] uppercase tracking-wider text-signal/60 hover:text-signal transition-colors"
+          >
+            {showCreateForm ? "— Close" : "+ Create"}
+          </button>
+        </div>
+
+        {/* Custom CM List */}
+        {customCMs.length > 0 && (
+          <div className="space-y-2">
+            {customCMs.map((cm) => (
+              <div
+                key={cm.id}
+                className="border border-white/8 bg-white/[0.01] p-2.5 space-y-1.5"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <h4 className="font-display text-sm uppercase text-frost truncate">
+                      {cm.name}
+                    </h4>
+                    <p className="font-mono text-[11px] text-white/50 leading-relaxed mt-0.5">
+                      {cm.description}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteCustomCM(cm.id)}
+                    className="font-mono text-[8px] text-signal/50 hover:text-signal uppercase tracking-wider transition-colors shrink-0 pt-0.5"
+                  >
+                    Delete
+                  </button>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="px-2 py-0.5 border border-white/15 text-[9px] font-mono uppercase text-white/50">
+                    {cm.category}
+                  </span>
+                  <span className="font-mono text-[9px] text-white/30">
+                    ⌛ {cm.durationMinutes} min
+                  </span>
+                </div>
+                {cm.triggerStates.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {cm.triggerStates.map((state) => (
+                      <span
+                        key={state}
+                        className={`px-2 py-1 border text-[9px] font-mono uppercase ${getStateChipColor(state as EmotionalState)}`}
+                      >
+                        {state}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {customCMs.length === 0 && !showCreateForm && (
+          <p className="font-mono text-[10px] text-white/25 text-center py-3">
+            No custom protocols created yet.
+          </p>
+        )}
+
+        {/* Create Form */}
+        <AnimatePresence>
+          {showCreateForm && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              className="overflow-hidden"
+            >
+              <div className="border border-white/10 bg-black/50 p-3 space-y-3">
+                <span className="font-mono text-[10px] uppercase tracking-wider text-white/40 block">
+                  Create Custom Protocol
+                </span>
+
+                {/* Name */}
+                <input
+                  type="text"
+                  placeholder="Protocol Name *"
+                  value={newCM.name}
+                  onChange={(e) => setNewCM((prev) => ({ ...prev, name: e.target.value }))}
+                  className="w-full bg-black/40 border border-white/10 px-3 py-1.5 font-mono text-xs text-white placeholder:text-white/25 focus:outline-none focus:border-signal/55 transition-colors"
+                />
+
+                {/* Description */}
+                <input
+                  type="text"
+                  placeholder="Description *"
+                  value={newCM.description}
+                  onChange={(e) => setNewCM((prev) => ({ ...prev, description: e.target.value }))}
+                  className="w-full bg-black/40 border border-white/10 px-3 py-1.5 font-mono text-xs text-white placeholder:text-white/25 focus:outline-none focus:border-signal/55 transition-colors"
+                />
+
+                {/* Category + Duration */}
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    placeholder="Category (e.g. Training)"
+                    value={newCM.category}
+                    onChange={(e) => setNewCM((prev) => ({ ...prev, category: e.target.value }))}
+                    className="bg-black/40 border border-white/10 px-3 py-1.5 font-mono text-xs text-white placeholder:text-white/25 focus:outline-none focus:border-signal/55 transition-colors"
+                  />
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={1}
+                      value={newCM.durationMinutes}
+                      onChange={(e) => setNewCM((prev) => ({ ...prev, durationMinutes: parseInt(e.target.value) || 10 }))}
+                      className="w-full bg-black/40 border border-white/10 px-3 py-1.5 font-mono text-xs text-white focus:outline-none focus:border-signal/55 transition-colors"
+                    />
+                    <span className="font-mono text-[9px] text-white/30 uppercase shrink-0">Min</span>
+                  </div>
+                </div>
+
+                {/* Trigger Causes */}
+                <input
+                  type="text"
+                  placeholder="Trigger Causes (comma-separated)"
+                  value={newCM.triggerCauses}
+                  onChange={(e) => setNewCM((prev) => ({ ...prev, triggerCauses: e.target.value }))}
+                  className="w-full bg-black/40 border border-white/10 px-3 py-1.5 font-mono text-xs text-white placeholder:text-white/25 focus:outline-none focus:border-signal/55 transition-colors"
+                />
+
+                {/* Trigger States Multi-Select */}
+                <div>
+                  <span className="font-mono text-[9px] uppercase tracking-wider text-white/30 block mb-1.5">
+                    Trigger States
+                  </span>
+                  <div className="space-y-1.5">
+                    {/* Positive */}
+                    <div>
+                      <span className="font-mono text-[8px] uppercase tracking-wider text-emerald-400/50 block mb-1">
+                        Positive
+                      </span>
+                      <div className="flex flex-wrap gap-1">
+                        {POSITIVE_STATES.map((state) => (
+                          <button
+                            key={state}
+                            type="button"
+                            onClick={() => toggleTriggerState(state as EmotionalState)}
+                            className={`px-2 py-1 border text-[9px] font-mono uppercase transition-all duration-200 ${
+                              newCM.triggerStates.includes(state as EmotionalState)
+                                ? "border-emerald-400/60 bg-emerald-400/15 text-emerald-400"
+                                : "border-white/10 text-white/30 hover:border-white/25"
+                            }`}
+                          >
+                            {state}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    {/* Neutral */}
+                    <div>
+                      <span className="font-mono text-[8px] uppercase tracking-wider text-warning/50 block mb-1">
+                        Neutral
+                      </span>
+                      <div className="flex flex-wrap gap-1">
+                        {NEUTRAL_STATES.map((state) => (
+                          <button
+                            key={state}
+                            type="button"
+                            onClick={() => toggleTriggerState(state as EmotionalState)}
+                            className={`px-2 py-1 border text-[9px] font-mono uppercase transition-all duration-200 ${
+                              newCM.triggerStates.includes(state as EmotionalState)
+                                ? "border-warning/60 bg-warning/15 text-warning"
+                                : "border-white/10 text-white/30 hover:border-white/25"
+                            }`}
+                          >
+                            {state}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    {/* Negative */}
+                    <div>
+                      <span className="font-mono text-[8px] uppercase tracking-wider text-signal/50 block mb-1">
+                        Negative
+                      </span>
+                      <div className="flex flex-wrap gap-1">
+                        {NEGATIVE_STATES.map((state) => (
+                          <button
+                            key={state}
+                            type="button"
+                            onClick={() => toggleTriggerState(state as EmotionalState)}
+                            className={`px-2 py-1 border text-[9px] font-mono uppercase transition-all duration-200 ${
+                              newCM.triggerStates.includes(state as EmotionalState)
+                                ? "border-signal/60 bg-signal/15 text-signal"
+                                : "border-white/10 text-white/30 hover:border-white/25"
+                            }`}
+                          >
+                            {state}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Submit */}
+                <button
+                  type="button"
+                  onClick={handleCreateCustomCM}
+                  disabled={!newCM.name.trim() || !newCM.description.trim()}
+                  className="w-full py-1.5 bg-signal/15 border border-signal/30 text-signal font-mono text-xs uppercase tracking-wider hover:bg-signal/25 transition-all duration-200 disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  Deploy Protocol
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
     </div>
   );
 }

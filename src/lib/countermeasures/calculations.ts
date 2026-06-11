@@ -1,4 +1,12 @@
-import { COUNTERMEASURES, NEEDS, SEVERITY_WEIGHT, THREAT_NEED_MAPPINGS, THREATS } from "./config";
+import {
+  COUNTERMEASURES,
+  NEEDS,
+  SEVERITY_WEIGHT,
+  THREAT_NEED_MAPPINGS,
+  THREATS,
+  CAUSE_COUNTERMEASURE_AFFINITY,
+  MOMENTUM_COUNTERMEASURE_IDS,
+} from "./config";
 import type {
   CountermeasureDefinition,
   CountermeasureEffectiveness,
@@ -9,8 +17,9 @@ import type {
   CountermeasureStackRecommendation,
   Need,
   NeedDefinition,
-  ThreatDefinition
+  ThreatDefinition,
 } from "./types";
+import type { StateCategory } from "../belief-intelligence/types";
 
 // ─── Utilities ────────────────────────────────────────────────
 function unique<T>(items: T[]): T[] {
@@ -26,29 +35,15 @@ function uniqueById<T extends { id: string }>(items: T[]): T[] {
   });
 }
 
-// ─── Cause → Countermeasure Affinity (Issue 4) ───────────────
-const CAUSE_COUNTERMEASURE_AFFINITY: Record<string, string[]> = {
-  "Missing Connection": ["connection_ping", "journal_dump", "recovery_walk"],
-  "Fear Of Failure": ["one_step_mission", "builder_sprint", "deep_breath_reset"],
-  "Purpose Drift": ["builder_sprint", "one_step_mission", "journal_dump"],
-  "Rejection Memory": ["journal_dump", "connection_ping", "deep_breath_reset"],
-  "Fatigue": ["recovery_walk", "deep_breath_reset", "one_step_mission"],
-  "Uncertainty": ["one_step_mission", "deep_breath_reset", "builder_sprint"],
-  "Lack Of Progress": ["builder_sprint", "one_step_mission", "recovery_walk"],
-  "Financial Stress": ["builder_sprint", "one_step_mission", "journal_dump"],
-  "Social Pressure": ["journal_dump", "deep_breath_reset", "phone_exile"],
-  "Identity Conflict": ["journal_dump", "one_step_mission", "builder_sprint"],
-  "Other": [],
-};
-
-// ─── Thought keyword → Countermeasure Affinity (Issue 4) ─────
+// ─── Thought keyword → Countermeasure Affinity ───────────────
 const THOUGHT_KEYWORD_AFFINITY: Array<{ keywords: string[]; countermeasureIds: string[] }> = [
-  { keywords: ["miss", "lonely", "alone", "connection"], countermeasureIds: ["connection_ping", "journal_dump"] },
-  { keywords: ["fail", "behind", "losing", "slow", "progress"], countermeasureIds: ["one_step_mission", "builder_sprint"] },
+  { keywords: ["miss", "lonely", "alone", "connection"], countermeasureIds: ["connection_ping", "call_friend", "journal_dump"] },
+  { keywords: ["fail", "behind", "losing", "slow", "progress"], countermeasureIds: ["one_step_mission", "builder_sprint", "task_breakdown"] },
   { keywords: ["overthink", "ruminate", "loop", "cannot stop"], countermeasureIds: ["deep_breath_reset", "journal_dump"] },
-  { keywords: ["tired", "exhausted", "drain", "fatigue"], countermeasureIds: ["recovery_walk", "deep_breath_reset"] },
+  { keywords: ["tired", "exhausted", "drain", "fatigue"], countermeasureIds: ["recovery_walk", "sleep_reset", "low_intensity_day"] },
   { keywords: ["distract", "phone", "scroll", "waste"], countermeasureIds: ["phone_exile", "one_step_mission"] },
   { keywords: ["potential", "purpose", "meaning", "drift"], countermeasureIds: ["builder_sprint", "one_step_mission", "journal_dump"] },
+  { keywords: ["momentum", "progress", "making progress", "moving"], countermeasureIds: ["continue_current_task", "deep_work_sprint", "mission_advancement"] },
 ];
 
 function getThoughtBoost(thought: string | null | undefined, countermeasureId: string): number {
@@ -69,6 +64,7 @@ function getCauseBoost(cause: string | null | undefined, countermeasureId: strin
   if (idx === 0) return 22;
   if (idx === 1) return 14;
   if (idx === 2) return 8;
+  if (idx >= 3) return 4;
   return 0;
 }
 
@@ -94,7 +90,7 @@ export function detectNeed(threatId: string): NeedDefinition {
   return NEEDS.find((need) => need.name === mapping?.need) ?? NEEDS[0];
 }
 
-// ─── Effectiveness Calculation (Issue 5) ─────────────────────
+// ─── Effectiveness Calculation ───────────────────────────────
 export function calculateCountermeasureEffectiveness(logs: CountermeasureLog[]): CountermeasureEffectiveness[] {
   return COUNTERMEASURES.map((countermeasure) => {
     const matchingLogs = logs.filter((log) => log.countermeasureId === countermeasure.id);
@@ -102,7 +98,6 @@ export function calculateCountermeasureEffectiveness(logs: CountermeasureLog[]):
     const acceptedCount = matchingLogs.filter((log) => log.accepted).length;
     const completedCount = matchingLogs.filter((log) => log.completed).length;
 
-    // Count skipped and failed from metadata
     const skippedCount = matchingLogs.filter((log) => {
       const outcome = (log.metadata?.outcome as string) || "";
       return outcome === "SKIPPED" || (!log.accepted && !log.completed);
@@ -132,13 +127,12 @@ export function calculateCountermeasureEffectiveness(logs: CountermeasureLog[]):
   }).sort((left, right) => right.effectivenessScore - left.effectivenessScore);
 }
 
-// ─── Per-countermeasure score boost from history (Issue 5) ───
+// ─── Per-countermeasure score boost from history ──────────────
 function getHistoricalBoost(countermeasureId: string, logs: CountermeasureLog[]): number {
   const effectiveness = calculateCountermeasureEffectiveness(logs).find(
     (entry) => entry.countermeasureId === countermeasureId
   );
   if (!effectiveness || effectiveness.recommendedCount === 0) return 0;
-  // Positive: completion rate boost. Negative: skip/fail penalty.
   return Math.round(effectiveness.effectivenessScore / 8);
 }
 
@@ -154,7 +148,7 @@ function getContextBoost(
       : 0;
   const sleepDebtBoost =
     input.context?.sleepDebt &&
-    (countermeasure.category === "Sleep Protection" || countermeasure.id === "recovery_walk")
+    (countermeasure.category === "Sleep Protection" || countermeasure.id === "recovery_walk" || countermeasure.id === "sleep_reset")
       ? 18
       : 0;
   const recentThreatBoost = input.context?.recentThreatIds?.some((threatId) =>
@@ -162,13 +156,12 @@ function getContextBoost(
   )
     ? 8
     : 0;
-  // Penalise if recently completed (avoid repetition)
   const recentlyCompletedPenalty = input.context?.recentCompletedCountermeasureIds?.includes(countermeasure.id) ? -6 : 0;
 
   return missedFoundationBoost + sleepDebtBoost + recentThreatBoost + recentlyCompletedPenalty;
 }
 
-// ─── Core Scoring Function (Issues 4 + 5) ────────────────────
+// ─── Core Scoring Function ───────────────────────────────────
 function scoreCountermeasure(
   countermeasure: CountermeasureDefinition,
   threat: ThreatDefinition,
@@ -187,26 +180,18 @@ function scoreCountermeasure(
     input.preferredMission && countermeasure.recommendedMissionRedirect === input.preferredMission ? 10 : 0;
   const priorityScore = Math.max(0, 30 - countermeasure.priority);
 
-  // Historical learning boost/penalty (Issue 5)
   const historicalBoost = getHistoricalBoost(countermeasure.id, logs);
-
-  // Cause and thought context boosts (Issue 4)
   const causeBoost = getCauseBoost(cause, countermeasure.id);
   const thoughtBoost = getThoughtBoost(thought, countermeasure.id);
 
   return (
-    threatMatch +
-    needMatch +
-    missionMatch +
-    priorityScore +
-    historicalBoost +
-    causeBoost +
-    thoughtBoost +
+    threatMatch + needMatch + missionMatch + priorityScore +
+    historicalBoost + causeBoost + thoughtBoost +
     getContextBoost(countermeasure, input)
   );
 }
 
-// ─── Stack Recommendation (Issue 3: deduplication) ───────────
+// ─── Stack Recommendation ────────────────────────────────────
 export function recommendCountermeasureStack(
   input: CountermeasureRecommendationInput,
   logs: CountermeasureLog[] = [],
@@ -222,13 +207,11 @@ export function recommendCountermeasureStack(
     score: scoreCountermeasure(countermeasure, detectedThreat, recommendedNeed.name, logs, input, cause, thought)
   })).sort((left, right) => right.score - left.score);
 
-  // Deduplicate by ID (Issue 3) — pick top 3 unique countermeasures
   const uniqueScoredCountermeasures = uniqueById(scoredCountermeasures.map((s) => ({ id: s.countermeasure.id, ...s })));
 
   const primary = uniqueScoredCountermeasures[0]?.countermeasure ?? COUNTERMEASURES[0];
   const secondary = uniqueScoredCountermeasures[1]?.countermeasure ?? COUNTERMEASURES[1];
 
-  // Emergency must be a quick-action protocol (< 10 min) and different from primary/secondary
   const emergencyCandidate = uniqueScoredCountermeasures.find(
     (s) =>
       s.countermeasure.id !== primary.id &&
@@ -243,7 +226,6 @@ export function recommendCountermeasureStack(
     { role: "EMERGENCY" as const, countermeasure: emergency, baseConfidence: 72 }
   ];
 
-  // Final dedup across the three chosen roles
   const usedIds = new Set<string>();
   const stack: CountermeasureStackItem[] = stackDefinitions
     .filter((item) => {
@@ -311,6 +293,50 @@ export function recommendCountermeasure(
     explanation: buildReason(recommendedCountermeasure, detectedThreat, recommendedNeed.name, cause, thought),
     confidenceScore: Math.min(95, 50 + selectedStates.length * 10)
   };
+}
+
+// ── V4.4: Contextual Recommendations (State-Category-Aware) ─────
+export interface MomentumRecommendation {
+  type: "momentum";
+  state: string;
+  thought: string | null;
+  suggestedActions: CountermeasureDefinition[];
+  message: string;
+}
+
+export function getMomentumRecommendations(): CountermeasureDefinition[] {
+  return COUNTERMEASURES.filter((cm) => MOMENTUM_COUNTERMEASURE_IDS.includes(cm.id));
+}
+
+export function getContextualRecommendations(
+  state: string,
+  cause: string | null,
+  classification: string | null,
+  stateCategory: StateCategory,
+): {
+  mode: "momentum" | "observation" | "intervention";
+  momentumActions?: CountermeasureDefinition[];
+  message?: string;
+} {
+  // Positive + Strengthening → Momentum Mode
+  if (stateCategory === "positive" && classification === "strengthening") {
+    return {
+      mode: "momentum",
+      momentumActions: getMomentumRecommendations(),
+      message: "Current trajectory is positive. Protect momentum.",
+    };
+  }
+
+  // Neutral → Observation (no intervention)
+  if (stateCategory === "neutral" && classification !== "limiting") {
+    return {
+      mode: "observation",
+      message: "Observation logged. No intervention required.",
+    };
+  }
+
+  // Negative / Limiting → Full intervention pipeline
+  return { mode: "intervention" };
 }
 
 export function createInterventionHistory(logs: CountermeasureLog[]) {

@@ -95,8 +95,12 @@ export function buildDailySnapshot(date: ISODate): DailyMissionSnapshot {
   // Dominant threat/need from highest risk check-in
   let dominantThreat = null;
   let dominantNeed = null;
-  if (allStates.length > 0) {
-    const threat = detectThreat(allStates);
+  // V4.2: Only run threat detection on check-ins that were classified as 'limiting'
+  const limitingStates = Array.from(
+    new Set(stateLogs.filter((l) => l.metadata?.thoughtType === "limiting").flatMap((l) => l.selectedStates))
+  ) as EmotionalState[];
+  if (limitingStates.length > 0) {
+    const threat = detectThreat(limitingStates);
     const need = detectNeed(threat.id);
     dominantThreat = threat;
     dominantNeed = need;

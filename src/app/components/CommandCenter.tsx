@@ -115,6 +115,9 @@ export default function CommandCenter({
   // This updates immediately after any check-in, regardless of risk level or recommendation prop
   const dominantThreat = useMemo(() => {
     if (!latestStateLog || latestStateLog.selectedStates.length === 0) return null;
+    // V4.2: only run threat detection for limiting thoughts
+    const thoughtType = latestStateLog.metadata?.thoughtType ?? null;
+    if (thoughtType !== "limiting") return null;
     return detectThreat(latestStateLog.selectedStates);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [latestStateLog, refreshKey]);
