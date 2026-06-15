@@ -24,6 +24,8 @@ export type CountermeasureCategory =
   | "Momentum Protection"
   | "Recovery"
   | "Anti-Avoidance"
+  | "Emotional Processing"
+  | "Physical Reset"
   | "Custom";
 
 export interface ThreatDefinition {
@@ -185,3 +187,44 @@ export interface CreateCustomCountermeasureInput {
   category: string;
   durationMinutes?: number;
 }
+
+// ── V4.5: Mission State Machine ─────────────────────────────────
+
+export type ProtocolStatus = "PENDING" | "ACTIVE" | "COMPLETED" | "FAILED" | "SKIPPED";
+
+export type MissionResolutionState = "ACTIVE" | "RESOLVED" | "ESCALATED" | "ABANDONED";
+
+export interface ActiveProtocol {
+  role: CountermeasureStackRole;
+  cmId: string;
+  cmName: string;
+  status: ProtocolStatus;
+  startedAt?: string;
+  completedAt?: string;
+  durationMinutes: number;
+}
+
+export interface MissionState {
+  sessionId: string;
+  threatId: string;
+  threatName: string;
+  needId: string;
+  needName: string;
+  activeProtocol: ActiveProtocol;
+  fallbackQueue: Array<{ role: CountermeasureStackRole; cmId: string; cmName: string; durationMinutes: number }>;
+  resolutionState: MissionResolutionState;
+  failureCount: number;
+  startedAt: string;
+  resolvedAt?: string;
+}
+
+export interface ProtocolAnalytics {
+  protocolId: string;
+  protocolName: string;
+  successRate: number;
+  failureRate: number;
+  skipRate: number;
+  totalUses: number;
+  lastUsed?: string;
+}
+

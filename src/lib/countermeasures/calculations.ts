@@ -354,3 +354,137 @@ export function createInterventionHistory(logs: CountermeasureLog[]) {
     }))
   );
 }
+
+// ── V4.5: Protocol Analytics ─────────────────────────────────────
+import type { MissionState, ProtocolAnalytics, ActiveProtocol, MissionResolutionState } from "./types";
+
+export function calculateProtocolAnalytics(logs: CountermeasureLog[]): ProtocolAnalytics[] {
+  const byProtocol: Record<string, CountermeasureLog[]> = {};
+  for (const log of logs) {
+    if (!byProtocol[log.countermeasureId]) byProtocol[log.countermeasureId] = [];
+    byProtocol[log.countermeasureId].push(log);
+  }
+
+  return Object.entries(byProtocol).map(([protocolId, protocolLogs]) => {
+    const total = protocolLogs.length;
+    const completed = protocolLogs.filter((l) => l.metadata?.outcome === "COMPLETED" || l.completed).length;
+    const failed = protocolLogs.filter((l) => l.metadata?.outcome === "FAILED").length;
+    const skipped = protocolLogs.filter((l) => l.metadata?.outcome === "SKIPPED" || (!l.accepted && !l.completed)).length;
+    const cm = COUNTERMEASURES.find((c) => c.id === protocolId);
+    const lastLog = protocolLogs.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+
+    return {
+      protocolId,
+      protocolName: cm?.name ?? protocolId.replace(/_/g, " "),
+      successRate: total > 0 ? Math.round((completed / total) * 100) : 0,
+      failureRate: total > 0 ? Math.round((failed / total) * 100) : 0,
+      skipRate: total > 0 ? Math.round((skipped / total) * 100) : 0,
+      totalUses: total,
+      lastUsed: lastLog?.createdAt,
+    };
+  }).sort((a, b) => b.totalUses - a.totalUses);
+}
+
+export function getSuccessBoost(cmId: string, logs: CountermeasureLog[]): number {
+  const analytics = calculateProtocolAnalytics(logs).find((a) => a.protocolId === cmId);
+  if (!analytics || analytics.totalUses < 2) return 0;
+
+  if (analytics.successRate > 70) return 15;
+  if (analytics.successRate > 50) return 8;
+  if (analytics.skipRate > 50) return -12;
+  if (analytics.failureRate > 50) return -8;
+  return 0;
+}
+
+// ── V4.5: Emergency Escalation Logic ────────────────────────────
+
+export function shouldEscalateToEmergency(
+  failureCount: number,
+  riskScore: number,
+  threatRepeatCount: number = 0,
+): boolean {
+  // Show emergency if: 2+ failures, or risk score > 30, or same threat 3+ times today
+  return failureCount >= 2 || riskScore > 30 || threatRepeatCount >= 3;
+}
+
+// ── V4.5: Mission State Machine ─────────────────────────────────
+
+export function buildMissionState(
+  stack: CountermeasureStackRecommendation,
+): MissionState {
+  const primary = stack.stack.find((s) => s.role === "PRIMARY") ?? stack.stack[0];
+  const fallback = stack.stack
+    .filter((s) => s.role !== "PRIMARY")
+    .map((s) => ({
+      role: s.role,
+      cmId: s.countermeasure.id,
+      cmName: s.countermeasure.name,
+      durationMinutes: s.countermeasure.durationMinutes,
+    }));
+
+  return {
+    sessionId: `mission_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    threatId: stack.recommendedThreat.id,
+    threatName: stack.recommendedThreat.name,
+    needId: stack.recommendedNeed.id,
+    needName: stack.recommendedNeed.name,
+    activeProtocol: {
+      role: primary.role,
+      cmId: primary.countermeasure.id,
+      cmName: primary.countermeasure.name,
+      status: "PENDING",
+      durationMinutes: primary.countermeasure.durationMinutes,
+    },
+    fallbackQueue: fallback,
+    resolutionState: "ACTIVE",
+    failureCount: 0,
+    startedAt: new Date().toISOString(),
+  };
+}
+
+export function advanceMission(
+  mission: MissionState,
+  outcome: "COMPLETED" | "FAILED" | "SKIPPED",
+): MissionState {
+  const now = new Date().toISOString();
+
+  if (outcome === "COMPLETED") {
+    return {
+      ...mission,
+      activeProtocol: { ...mission.activeProtocol, status: "COMPLETED", completedAt: now },
+      resolutionState: "RESOLVED",
+      resolvedAt: now,
+    };
+  }
+
+  // FAILED or SKIPPED — try next in fallback queue
+  const newFailureCount = outcome === "FAILED" ? mission.failureCount + 1 : mission.failureCount;
+  const next = mission.fallbackQueue[0];
+
+  if (!next) {
+    // No fallback left
+    return {
+      ...mission,
+      activeProtocol: { ...mission.activeProtocol, status: outcome, completedAt: now },
+      resolutionState: "ABANDONED",
+      failureCount: newFailureCount,
+      resolvedAt: now,
+    };
+  }
+
+  // Promote next from queue
+  return {
+    ...mission,
+    activeProtocol: {
+      role: next.role,
+      cmId: next.cmId,
+      cmName: next.cmName,
+      status: "PENDING",
+      durationMinutes: next.durationMinutes,
+    },
+    fallbackQueue: mission.fallbackQueue.slice(1),
+    resolutionState: newFailureCount >= 2 ? "ESCALATED" : "ACTIVE",
+    failureCount: newFailureCount,
+  };
+}
+
