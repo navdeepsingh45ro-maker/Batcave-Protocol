@@ -9,6 +9,7 @@ import CountermeasurePanel from "./CountermeasurePanel";
 import CommandCenter from "./CommandCenter";
 import IntelligencePanel from "./IntelligencePanel";
 import DataVaultPanel from "./DataVaultPanel";
+import DailyTransmission from "./DailyTransmission";
 import type { DailyStateLog } from "@/lib/state-detection";
 import { localStateDetectionRepository } from "@/lib/state-detection";
 import { recommendCountermeasure } from "@/lib/countermeasures";
@@ -364,6 +365,20 @@ export default function Dashboard() {
                 </motion.div>
               )}
             </AnimatePresence>
+
+            {/* ─── DAILY TRANSMISSION (V4.6) ───────────────────────── */}
+            {activeMode === "deployment" && offsetDays === 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5, delay: 0.1 }}
+              >
+                <DailyTransmission
+                  todaysDate={todaysDate}
+                  dominantState={latestStateLog?.selectedStates?.[0] ?? null}
+                />
+              </motion.div>
+            )}
 
             {/* ─── MAIN GRID ──────────────────────────────────────── */}
             <AnimatePresence mode="wait">
