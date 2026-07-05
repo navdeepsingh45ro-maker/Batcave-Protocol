@@ -1,9 +1,18 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { isMissionActive, getActiveMission, getMissionDayNumber, getMissionTotalDays, getMissionProgress } from "@/lib/mission-mode/modeManager";
+import type { ISODate } from "@/lib/foundation/types";
 
-const bootLines = [
+function getTodaysDate(): ISODate {
+  const now = new Date();
+  const offset = 5.5 * 60 * 60 * 1000;
+  const ist = new Date(now.getTime() + offset);
+  return ist.toISOString().slice(0, 10) as ISODate;
+}
+
+const baseBootLines = [
   { text: "> WAYNE ENTERPRISES PRIVATE NETWORK", delay: 200 },
   { text: "> ESTABLISHING ENCRYPTED TUNNEL .......", delay: 400 },
   { text: "> INITIALIZING BATCAVE SYSTEMS", delay: 300 },
@@ -11,9 +20,30 @@ const bootLines = [
   { text: "> MISSION CONTROL .............. ONLINE", delay: 300 },
   { text: "> ENVIRONMENT SENSORS .......... ONLINE", delay: 300 },
   { text: "> COMMAND INTERFACE ............. READY", delay: 350 },
-  { text: "", delay: 200 },
-  { text: "> WELCOME BACK, SIR.", delay: 500 },
 ];
+
+function buildBootLines() {
+  const lines = [...baseBootLines];
+  const mission = getActiveMission();
+  const today = getTodaysDate();
+
+  if (mission && isMissionActive()) {
+    const dayNum = getMissionDayNumber(mission, today);
+    const totalDays = getMissionTotalDays(mission);
+    const progress = getMissionProgress(mission, today);
+
+    lines.push({ text: "", delay: 150 });
+    lines.push({ text: "> MISSION MODE .................. ACTIVE", delay: 300 });
+    lines.push({ text: `> ${mission.name.toUpperCase()} ......... LOADED`, delay: 280 });
+    lines.push({ text: `> MISSION: ${mission.objective}`, delay: 250 });
+    lines.push({ text: `> DAY ${dayNum} OF ${totalDays} — ${progress}% COMPLETE`, delay: 300 });
+  }
+
+  lines.push({ text: "", delay: 200 });
+  lines.push({ text: "> WELCOME BACK, SIR.", delay: 500 });
+
+  return lines;
+}
 
 function BatLogo() {
   return (
@@ -62,6 +92,7 @@ export default function BootSequence({
 }) {
   const [visibleLines, setVisibleLines] = useState(0);
   const [showLogo, setShowLogo] = useState(true);
+  const bootLines = useMemo(() => buildBootLines(), []);
 
   useEffect(() => {
     // Show logo for 1.5s, then start text
@@ -92,7 +123,7 @@ export default function BootSequence({
     }, nextDelay);
 
     return () => clearTimeout(timer);
-  }, [visibleLines, showLogo, onComplete]);
+  }, [visibleLines, showLogo, onComplete, bootLines]);
 
   return (
     <AnimatePresence>
@@ -120,7 +151,9 @@ export default function BootSequence({
                     color:
                       i === bootLines.length - 1
                         ? "rgba(255,42,42,0.9)"
-                        : "rgba(215,224,231,0.55)",
+                        : line.text.includes("MISSION")
+                          ? "rgba(212,165,67,0.85)"
+                          : "rgba(215,224,231,0.55)",
                   }}
                 >
                   {line.text}

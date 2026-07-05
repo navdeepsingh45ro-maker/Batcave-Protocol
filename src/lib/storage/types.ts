@@ -20,6 +20,10 @@ export const ALL_DATA_KEYS: readonly string[] = [
   "batcave.countermeasure.logs.v1",
   // Timeline
   "batcave.behavioral.timeline.v2_7",
+  // Mission Mode
+  "batcave.mission.active",
+  "batcave.mission.dayLogs",
+  "batcave.mission.archive",
 ] as const;
 
 /** Full backup file structure (exported JSON) */

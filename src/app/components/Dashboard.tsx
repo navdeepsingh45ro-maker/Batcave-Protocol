@@ -18,6 +18,37 @@ import type { CountermeasureRecommendation } from "@/lib/countermeasures";
 import type { ISODate } from "@/lib/foundation";
 import { audioManager } from "@/lib/audioManager";
 
+// ── Mission Mode Imports ────────────────────────────────────────
+import MissionDashboardHeader from "./mission/MissionDashboardHeader";
+import MissionCard from "./mission/MissionCard";
+import MissionScorePanel from "./mission/MissionScorePanel";
+import MomentumPanel from "./mission/MomentumPanel";
+import ShutdownModal from "./mission/ShutdownModal";
+import MissionHistoryPanel from "./mission/MissionHistoryPanel";
+import ModeSelector from "./mission/ModeSelector";
+import {
+  isMissionActive,
+  getActiveMission,
+  isMissionExpired,
+  deactivateMission,
+} from "@/lib/mission-mode/modeManager";
+import {
+  calculateMissionDayScore,
+  getScoreBreakdown,
+  getCardState,
+  buildMissionDayLog,
+} from "@/lib/mission-mode/scoreEngine";
+import { checkMomentumFlags, calculateMissionStability } from "@/lib/mission-mode/momentumEngine";
+import { getMissionRating } from "@/lib/mission-mode/config";
+import {
+  getDayLogsForMission,
+  upsertDayLog,
+  getDayLog,
+  getShutdownDismissedDate,
+  setShutdownDismissedDate,
+} from "@/lib/mission-mode/repository";
+import type { MissionConfig, ShutdownReflection } from "@/lib/mission-mode/types";
+
 /** Returns today's date in IST as YYYY-MM-DD */
 function getTodaysDate(): ISODate {
   const now = new Date();
@@ -39,6 +70,14 @@ function formatDateLabel(dateStr: ISODate, offset: number): string {
   if (offset === 1) return "Yesterday";
   const d = new Date(`${dateStr}T00:00:00.000Z`);
   return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
+
+/** Check if it's past 8 PM IST */
+function isPastShutdownTime(): boolean {
+  const now = new Date();
+  const offset = 5.5 * 60 * 60 * 1000;
+  const ist = new Date(now.getTime() + offset);
+  return ist.getUTCHours() >= 14; // 8 PM IST = 14:30 UTC, close enough
 }
 
 const panelVariants = {
@@ -84,6 +123,89 @@ export default function Dashboard() {
 
   // Countermeasure recommendation
   const [recommendation, setRecommendation] = useState<CountermeasureRecommendation | null>(null);
+
+  // ── Mission Mode State ────────────────────────────────────────
+  const [missionModeKey, setMissionModeKey] = useState(0);
+  const [showShutdownModal, setShowShutdownModal] = useState(false);
+
+  const missionActive = useMemo(() => isMissionActive(), [missionModeKey, refreshKey]);
+  const activeMission = useMemo(() => getActiveMission(), [missionModeKey, refreshKey]);
+
+  // Mission-specific computed data
+  const missionScore = useMemo(() => {
+    if (!activeMission) return 0;
+    return calculateMissionDayScore(activeMission, activeDate);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeMission, activeDate, refreshKey]);
+
+  const missionRating = useMemo(() => {
+    if (!activeMission) return "—";
+    return getMissionRating(missionScore, activeMission.ratings).label;
+  }, [activeMission, missionScore]);
+
+  const missionBreakdown = useMemo(() => {
+    if (!activeMission) return [];
+    return getScoreBreakdown(activeMission, activeDate);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeMission, activeDate, refreshKey]);
+
+  const missionCardStates = useMemo(() => {
+    if (!activeMission) return [];
+    return activeMission.cards.map((card) => getCardState(activeMission, activeDate, card.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeMission, activeDate, refreshKey]);
+
+  const momentumFlags = useMemo(() => {
+    if (!activeMission) return null;
+    return checkMomentumFlags(activeMission, activeDate);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeMission, activeDate, refreshKey]);
+
+  const missionStability = useMemo(() => {
+    if (!activeMission) return null;
+    const dayLogs = getDayLogsForMission(activeMission.id);
+    return calculateMissionStability(activeMission, dayLogs);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeMission, refreshKey]);
+
+  // Auto-save mission day log when data changes
+  useEffect(() => {
+    if (!activeMission || !booted) return;
+    const dayLog = buildMissionDayLog(activeMission, activeDate);
+    if (momentumFlags) {
+      dayLog.momentumFlags = momentumFlags;
+    }
+    // Check if shutdown was already done today
+    const existing = getDayLog(activeMission.id, activeDate);
+    if (existing?.shutdownReflection) {
+      dayLog.shutdownReflection = existing.shutdownReflection;
+    }
+    upsertDayLog(dayLog);
+  }, [activeMission, activeDate, missionScore, momentumFlags, booted]);
+
+  // Auto-expire mission
+  useEffect(() => {
+    if (activeMission && isMissionExpired(activeMission, todaysDate)) {
+      deactivateMission("Auto-completed: mission duration ended.", "completed");
+      setMissionModeKey((k) => k + 1);
+    }
+  }, [activeMission, todaysDate]);
+
+  // Auto-open shutdown modal after 8 PM IST (only once per day)
+  useEffect(() => {
+    if (!activeMission || !booted) return;
+    const dismissed = getShutdownDismissedDate();
+    const existing = getDayLog(activeMission.id, todaysDate);
+
+    if (
+      isPastShutdownTime() &&
+      dismissed !== todaysDate &&
+      !existing?.shutdownReflection &&
+      offsetDays === 0
+    ) {
+      setShowShutdownModal(true);
+    }
+  }, [activeMission, booted, todaysDate, offsetDays]);
 
   // Initialize audio state from local storage on mount
   useEffect(() => {
@@ -160,8 +282,32 @@ export default function Dashboard() {
   const handleSetOffset = useCallback((offset: number) => {
     audioManager.playClick();
     setOffsetDays(offset);
-    // refreshStateLogs will trigger from the activeDate change via useEffect
   }, []);
+
+  const handleModeChange = useCallback(() => {
+    setMissionModeKey((k) => k + 1);
+    setRefreshKey((k) => k + 1);
+  }, []);
+
+  const handleShutdownSubmit = useCallback(
+    (reflection: ShutdownReflection) => {
+      if (!activeMission) return;
+      const dayLog = buildMissionDayLog(activeMission, todaysDate);
+      dayLog.shutdownReflection = reflection;
+      if (momentumFlags) {
+        dayLog.momentumFlags = momentumFlags;
+      }
+      upsertDayLog(dayLog);
+      setShowShutdownModal(false);
+      setShutdownDismissedDate(todaysDate);
+    },
+    [activeMission, todaysDate, momentumFlags]
+  );
+
+  const handleShutdownClose = useCallback(() => {
+    setShowShutdownModal(false);
+    setShutdownDismissedDate(todaysDate);
+  }, [todaysDate]);
 
   return (
     <>
@@ -181,9 +327,21 @@ export default function Dashboard() {
         <main className="scanlines min-h-screen bg-obsidian p-3 text-frost sm:p-4">
           <div className="mx-auto flex min-h-[calc(100vh-24px)] max-w-[1800px] flex-col gap-3">
 
-            {/* ─── HEADER ─────────────────────────────────────────── */}
+            {/* ─── MISSION HEADER (when mission active) ──────────── */}
+            {missionActive && activeMission && activeMode === "deployment" && (
+              <MissionDashboardHeader
+                config={activeMission}
+                todaysDate={activeDate}
+                score={missionScore}
+                rating={missionRating}
+              />
+            )}
+
+            {/* ─── NORMAL HEADER ─────────────────────────────────── */}
             <motion.header
-              className="panel flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between bg-black/40 border-white/8"
+              className={`panel flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between bg-black/40 border-white/8 ${
+                missionActive ? "border-l-2 border-l-amber-400/40" : ""
+              }`}
               variants={panelVariants}
               initial="hidden"
               animate="visible"
@@ -214,7 +372,7 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {/* Mode Toggle Tabs & Mute Button */}
+              {/* Mode Toggle Tabs & Mode Selector & Mute Button */}
               <div className="flex flex-wrap items-center gap-3">
                 <div className="flex items-center border border-white/10 bg-black/45 p-1 rounded-sm">
                   <button
@@ -251,6 +409,9 @@ export default function Dashboard() {
                     Data Vault
                   </button>
                 </div>
+
+                {/* Mode Selector */}
+                <ModeSelector todaysDate={todaysDate} onModeChange={handleModeChange} />
 
                 <button
                   type="button"
@@ -405,7 +566,7 @@ export default function Dashboard() {
                     />
                   </motion.div>
 
-                  {/* CENTER: State Detection + Countermeasure */}
+                  {/* CENTER: Mission Cards + State Detection + Countermeasure */}
                   <motion.div
                     variants={panelVariants}
                     initial="hidden"
@@ -413,6 +574,35 @@ export default function Dashboard() {
                     custom={2}
                     className="flex min-h-0 flex-col gap-3"
                   >
+                    {/* Mission Cards (only when mission active) */}
+                    {missionActive && activeMission && (
+                      <div className="space-y-2">
+                        <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-amber-400/50">
+                          Mission Priorities
+                        </p>
+                        <div className="grid gap-2 sm:grid-cols-3">
+                          {activeMission.cards.map((card, idx) => {
+                            const cardState = missionCardStates[idx];
+                            return cardState ? (
+                              <MissionCard
+                                key={card.id}
+                                config={card}
+                                state={cardState}
+                              />
+                            ) : null;
+                          })}
+                        </div>
+
+                        {/* Momentum Panel */}
+                        {momentumFlags && (
+                          <MomentumPanel
+                            flags={momentumFlags}
+                            stability={missionStability}
+                          />
+                        )}
+                      </div>
+                    )}
+
                     <StatePanel
                       todaysDate={activeDate}
                       onStateCheckedIn={handleStateCheckedIn}
@@ -424,13 +614,13 @@ export default function Dashboard() {
                     />
                   </motion.div>
 
-                  {/* RIGHT: Command Center */}
+                  {/* RIGHT: Command Center + Mission Score */}
                   <motion.div
                     variants={panelVariants}
                     initial="hidden"
                     animate="visible"
                     custom={3}
-                    className="flex min-h-0 flex-col"
+                    className="flex min-h-0 flex-col gap-3"
                   >
                     <CommandCenter
                       todaysDate={activeDate}
@@ -439,6 +629,19 @@ export default function Dashboard() {
                       recommendation={recommendation}
                       refreshKey={refreshKey}
                     />
+
+                    {/* Mission Score Panel (only when mission active) */}
+                    {missionActive && activeMission && (
+                      <MissionScorePanel
+                        config={activeMission}
+                        score={missionScore}
+                        rating={missionRating}
+                        breakdown={missionBreakdown}
+                      />
+                    )}
+
+                    {/* Mission History (always visible) */}
+                    <MissionHistoryPanel refreshKey={refreshKey} />
                   </motion.div>
                 </motion.div>
               ) : activeMode === "intelligence" ? (
@@ -469,6 +672,17 @@ export default function Dashboard() {
               )}
             </AnimatePresence>
           </div>
+
+          {/* ─── SHUTDOWN MODAL ─────────────────────────────────── */}
+          {missionActive && activeMission && (
+            <ShutdownModal
+              config={activeMission}
+              todaysDate={todaysDate}
+              isOpen={showShutdownModal}
+              onClose={handleShutdownClose}
+              onSubmit={handleShutdownSubmit}
+            />
+          )}
         </main>
       )}
     </>

@@ -11,6 +11,11 @@ const config: Config = {
         signal: "#ff2a2a",
         warning: "#d89f35",
         frost: "#d7e0e7",
+        mission: {
+          amber: "#d4a543",
+          active: "#2d7d46",
+          dim: "#8b7435",
+        },
         "bat-glow": {
           50: "#fff1f1",
           100: "#ffe1e1",
@@ -112,6 +117,7 @@ const config: Config = {
         "fade-in": "fade-in 0.4s ease-out forwards",
         "boot-text": "boot-text 0.3s ease-out forwards",
         "counter-glow": "counter-glow 3s ease-in-out infinite",
+        "mission-pulse": "mission-pulse 2.5s ease-in-out infinite",
       },
     },
   },
