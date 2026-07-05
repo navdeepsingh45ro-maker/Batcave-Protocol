@@ -51,7 +51,7 @@ export default function MissionDashboardHeader({
               Mission Mode Active
             </p>
             <h2 className="font-display text-xl uppercase leading-tight text-white sm:text-2xl">
-              {config.name}
+              {config.customName ?? config.name}
             </h2>
           </div>
         </div>
@@ -87,7 +87,7 @@ export default function MissionDashboardHeader({
           Mission Objective
         </p>
         <p className="mt-1 font-display text-sm uppercase tracking-wide text-frost">
-          {config.objective}
+          {config.customObjective ?? config.objective}
         </p>
       </div>
 

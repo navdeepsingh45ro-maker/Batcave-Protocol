@@ -82,7 +82,8 @@ export function getMissionDayNumber(config: MissionConfig, date: ISODate): numbe
  */
 export function getMissionTotalDays(config: MissionConfig): number {
   const start = new Date(`${config.startDate}T00:00:00.000Z`);
-  const end = new Date(`${config.endDate}T00:00:00.000Z`);
+  const endDate = config.customEndDate ?? config.endDate;
+  const end = new Date(`${endDate}T00:00:00.000Z`);
   return Math.floor((end.getTime() - start.getTime()) / 86_400_000) + 1;
 }
 
@@ -90,7 +91,8 @@ export function getMissionTotalDays(config: MissionConfig): number {
  * Get days remaining in the mission.
  */
 export function getMissionDaysRemaining(config: MissionConfig, date: ISODate): number {
-  const end = new Date(`${config.endDate}T00:00:00.000Z`);
+  const endDate = config.customEndDate ?? config.endDate;
+  const end = new Date(`${endDate}T00:00:00.000Z`);
   const current = new Date(`${date}T00:00:00.000Z`);
   const diffMs = end.getTime() - current.getTime();
   return Math.max(0, Math.floor(diffMs / 86_400_000));
@@ -109,7 +111,8 @@ export function getMissionProgress(config: MissionConfig, date: ISODate): number
  * Check if the mission has expired (current date is past end date).
  */
 export function isMissionExpired(config: MissionConfig, date: ISODate): boolean {
-  return date > config.endDate;
+  const endDate = config.customEndDate ?? config.endDate;
+  return date > endDate;
 }
 
 /**
@@ -126,4 +129,14 @@ export function getMissionStatus(config: MissionConfig, date: ISODate): string {
   if (isMissionExpired(config, date)) return "COMPLETED";
   if (!isMissionStarted(config, date)) return "PENDING";
   return "ACTIVE";
+}
+
+/**
+ * Update the active mission configuration values in storage.
+ */
+export function updateActiveMissionConfig(updates: Partial<MissionConfig>): void {
+  const state = getActiveModeState();
+  if (!state || !state.activeMission) return;
+  state.activeMission = { ...state.activeMission, ...updates };
+  setActiveModeState(state);
 }

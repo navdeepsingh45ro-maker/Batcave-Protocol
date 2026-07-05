@@ -54,6 +54,11 @@ export interface MissionConfig {
   cards: MissionCardConfig[];
   ratings: MissionRatingThreshold[];
   shutdownQuestions: string[];
+  // Editable properties:
+  customName?: string;
+  customObjective?: string;
+  customEndDate?: ISODate;
+  missionNotes?: string;
 }
 
 // ── Mission Day Tracking ────────────────────────────────────────
@@ -105,6 +110,13 @@ export interface MissionDayLog {
   momentumFlags: MomentumFlags;
   createdAt: ISODateTime;
   updatedAt: ISODateTime;
+  // Day-specific editable features:
+  builderGoal?: string;
+  athleteLocation?: "Home" | "Park";
+  athleteDrills?: { id: string; name: string; completed: boolean }[];
+  anchorTasks?: { id: string; name: string; completed: boolean }[];
+  dayNotes?: string;
+  manualStatuses?: Record<string, MissionCardStatus>;
 }
 
 // ── Mission Stability Metrics ───────────────────────────────────

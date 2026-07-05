@@ -75,10 +75,15 @@ export function getScoreBreakdown(
  * Build the card state for a specific mission card.
  * Maps foundation activity data to mission card status.
  */
+/**
+ * Build the card state for a specific mission card.
+ * Maps foundation activity data to mission card status.
+ */
 export function getCardState(
   config: MissionConfig,
   date: ISODate,
-  cardId: string
+  cardId: string,
+  existingLog?: MissionDayLog | null
 ): MissionCardState {
   const card = config.cards.find((c) => c.id === cardId);
   if (!card) {
@@ -103,6 +108,33 @@ export function getCardState(
     completedAt: a.createdAt,
     durationMinutes: a.durationMinutes,
   }));
+
+  // Append custom user-defined drills or tasks if they exist
+  if (existingLog) {
+    if (cardId === "athlete" && existingLog.athleteDrills) {
+      existingLog.athleteDrills.forEach((drill) => {
+        subtasks.push({
+          id: drill.id,
+          label: drill.name,
+          completed: drill.completed,
+        });
+      });
+    } else if (cardId === "anchor" && existingLog.anchorTasks) {
+      existingLog.anchorTasks.forEach((task) => {
+        subtasks.push({
+          id: task.id,
+          label: task.name,
+          completed: task.completed,
+        });
+      });
+    } else if (cardId === "builder" && existingLog.builderGoal) {
+      subtasks.unshift({
+        id: "builder_goal",
+        label: `Goal: ${existingLog.builderGoal}`,
+        completed: activities.length > 0, // Mark complete if any builder activity logged
+      });
+    }
+  }
 
   // Calculate score for this card's categories
   const relatedCategories = config.scoringWeights.categories.filter((cat) =>
@@ -131,6 +163,10 @@ export function getCardState(
     status = "in-progress";
   }
 
+  if (existingLog?.manualStatuses?.[cardId]) {
+    status = existingLog.manualStatuses[cardId];
+  }
+
   const latestActivity = activities.length > 0
     ? activities.reduce((latest, a) =>
         a.createdAt > latest.createdAt ? a : latest
@@ -151,14 +187,20 @@ export function getCardState(
  * Build the complete day log for a mission day.
  * This is the primary function Dashboard calls to get mission state.
  */
-export function buildMissionDayLog(config: MissionConfig, date: ISODate): MissionDayLog {
+export function buildMissionDayLog(
+  config: MissionConfig,
+  date: ISODate,
+  existingLog?: MissionDayLog | null
+): MissionDayLog {
   const score = calculateMissionDayScore(config, date);
   const rating = getMissionRating(score, config.ratings);
 
-  const cardStates = config.cards.map((card) => getCardState(config, date, card.id));
+  const cardStates = config.cards.map((card) =>
+    getCardState(config, date, card.id, existingLog)
+  );
 
-  return {
-    id: createId("mday"),
+  const baseLog: MissionDayLog = {
+    id: existingLog?.id ?? createId("mday"),
     missionId: config.id,
     date,
     score,
@@ -171,7 +213,26 @@ export function buildMissionDayLog(config: MissionConfig, date: ISODate): Missio
       consecutiveAthleteMisses: 0,
       momentumRisk: false,
     },
-    createdAt: now(),
+    createdAt: existingLog?.createdAt ?? now(),
     updatedAt: now(),
   };
+
+  // Merge custom user fields if they exist
+  if (existingLog) {
+    return {
+      ...baseLog,
+      builderGoal: existingLog.builderGoal,
+      athleteLocation: existingLog.athleteLocation,
+      athleteDrills: existingLog.athleteDrills,
+      anchorTasks: existingLog.anchorTasks,
+      dayNotes: existingLog.dayNotes,
+      shutdownReflection: existingLog.shutdownReflection,
+      momentumFlags: {
+        ...baseLog.momentumFlags,
+        ...existingLog.momentumFlags,
+      },
+    };
+  }
+
+  return baseLog;
 }

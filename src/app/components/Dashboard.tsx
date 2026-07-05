@@ -15,7 +15,8 @@ import { localStateDetectionRepository } from "@/lib/state-detection";
 import { recommendCountermeasure } from "@/lib/countermeasures";
 import { localCountermeasureRepository } from "@/lib/countermeasures";
 import type { CountermeasureRecommendation } from "@/lib/countermeasures";
-import type { ISODate } from "@/lib/foundation";
+import type { ISODate, FoundationType } from "@/lib/foundation";
+import { localFoundationRepository } from "@/lib/foundation";
 import { audioManager } from "@/lib/audioManager";
 
 // ── Mission Mode Imports ────────────────────────────────────────
@@ -26,6 +27,7 @@ import MomentumPanel from "./mission/MomentumPanel";
 import ShutdownModal from "./mission/ShutdownModal";
 import MissionHistoryPanel from "./mission/MissionHistoryPanel";
 import ModeSelector from "./mission/ModeSelector";
+import MissionControlDrawer from "./mission/MissionControlDrawer";
 import {
   isMissionActive,
   getActiveMission,
@@ -47,7 +49,7 @@ import {
   getShutdownDismissedDate,
   setShutdownDismissedDate,
 } from "@/lib/mission-mode/repository";
-import type { MissionConfig, ShutdownReflection } from "@/lib/mission-mode/types";
+import type { MissionConfig, ShutdownReflection, MissionDayLog } from "@/lib/mission-mode/types";
 
 /** Returns today's date in IST as YYYY-MM-DD */
 function getTodaysDate(): ISODate {
@@ -124,12 +126,23 @@ export default function Dashboard() {
   // Countermeasure recommendation
   const [recommendation, setRecommendation] = useState<CountermeasureRecommendation | null>(null);
 
+  const handleFoundationLogged = useCallback(() => {
+    setRefreshKey((k) => k + 1);
+  }, []);
+
   // ── Mission Mode State ────────────────────────────────────────
   const [missionModeKey, setMissionModeKey] = useState(0);
   const [showShutdownModal, setShowShutdownModal] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const missionActive = useMemo(() => isMissionActive(), [missionModeKey, refreshKey]);
   const activeMission = useMemo(() => getActiveMission(), [missionModeKey, refreshKey]);
+
+  // Current daily log
+  const currentDayLog = useMemo(() => {
+    if (!activeMission) return null;
+    return getDayLog(activeMission.id, activeDate);
+  }, [activeMission, activeDate, refreshKey]);
 
   // Mission-specific computed data
   const missionScore = useMemo(() => {
@@ -151,9 +164,11 @@ export default function Dashboard() {
 
   const missionCardStates = useMemo(() => {
     if (!activeMission) return [];
-    return activeMission.cards.map((card) => getCardState(activeMission, activeDate, card.id));
+    return activeMission.cards.map((card) =>
+      getCardState(activeMission, activeDate, card.id, currentDayLog)
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeMission, activeDate, refreshKey]);
+  }, [activeMission, activeDate, currentDayLog, refreshKey]);
 
   const momentumFlags = useMemo(() => {
     if (!activeMission) return null;
@@ -168,17 +183,52 @@ export default function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeMission, refreshKey]);
 
+  // Update daily log fields
+  const handleUpdateDayLog = useCallback(
+    (updates: Partial<MissionDayLog>) => {
+      if (!activeMission) return;
+      const existing = getDayLog(activeMission.id, activeDate) || buildMissionDayLog(activeMission, activeDate);
+      const merged = {
+        ...existing,
+        ...updates,
+        manualStatuses: {
+          ...(existing.manualStatuses ?? {}),
+          ...(updates.manualStatuses ?? {}),
+        },
+        updatedAt: new Date().toISOString(),
+      };
+      upsertDayLog(merged);
+      setRefreshKey((k) => k + 1);
+    },
+    [activeMission, activeDate]
+  );
+
+  // Quick activity logs
+  const handleLogFoundation = useCallback(
+    (fType: FoundationType, subtype?: string) => {
+      const activitiesList = localFoundationRepository.listActivities();
+      const def = activitiesList.find(
+        (a) => a.foundation === fType && (subtype ? a.name === subtype : true)
+      );
+      if (def) {
+        localFoundationRepository.addActivityLog({
+          date: activeDate,
+          activityId: def.id,
+          durationMinutes: 30,
+        });
+        handleFoundationLogged();
+      }
+    },
+    [activeDate, handleFoundationLogged]
+  );
+
   // Auto-save mission day log when data changes
   useEffect(() => {
     if (!activeMission || !booted) return;
-    const dayLog = buildMissionDayLog(activeMission, activeDate);
+    const existing = getDayLog(activeMission.id, activeDate);
+    const dayLog = buildMissionDayLog(activeMission, activeDate, existing);
     if (momentumFlags) {
       dayLog.momentumFlags = momentumFlags;
-    }
-    // Check if shutdown was already done today
-    const existing = getDayLog(activeMission.id, activeDate);
-    if (existing?.shutdownReflection) {
-      dayLog.shutdownReflection = existing.shutdownReflection;
     }
     upsertDayLog(dayLog);
   }, [activeMission, activeDate, missionScore, momentumFlags, booted]);
@@ -257,9 +307,7 @@ export default function Dashboard() {
     setBooted(true);
   }, []);
 
-  const handleFoundationLogged = useCallback(() => {
-    setRefreshKey((k) => k + 1);
-  }, []);
+
 
   const handleStateCheckedIn = useCallback(
     (log: DailyStateLog) => {
@@ -411,7 +459,7 @@ export default function Dashboard() {
                 </div>
 
                 {/* Mode Selector */}
-                <ModeSelector todaysDate={todaysDate} onModeChange={handleModeChange} />
+                <ModeSelector todaysDate={todaysDate} onOpenDrawer={() => setDrawerOpen(true)} />
 
                 <button
                   type="button"
@@ -588,6 +636,10 @@ export default function Dashboard() {
                                 key={card.id}
                                 config={card}
                                 state={cardState}
+                                todaysDate={activeDate}
+                                dayLog={currentDayLog}
+                                onUpdateDayLog={handleUpdateDayLog}
+                                onLogFoundation={handleLogFoundation}
                               />
                             ) : null;
                           })}
@@ -682,6 +734,30 @@ export default function Dashboard() {
               onClose={handleShutdownClose}
               onSubmit={handleShutdownSubmit}
             />
+          )}
+
+          {/* ─── MISSION CONTROL DRAWER ─────────────────────────── */}
+          <MissionControlDrawer
+            todaysDate={todaysDate}
+            isOpen={drawerOpen}
+            onClose={() => setDrawerOpen(false)}
+            onRefresh={handleModeChange}
+            score={missionScore}
+            rating={missionRating}
+          />
+
+          {/* ─── FLOATING MISSION CONTROL BUTTON ────────────────── */}
+          {missionActive && (
+            <button
+              type="button"
+              onClick={() => {
+                audioManager.playClick();
+                setDrawerOpen(true);
+              }}
+              className="fixed bottom-6 right-6 z-40 flex items-center gap-2 border border-amber-400/40 bg-graphite/95 px-4 py-2.5 font-display text-[10px] uppercase tracking-wider text-amber-400 shadow-console hover:bg-amber-400/10 hover:border-amber-400/80 transition-all select-none animate-pulse"
+            >
+              ⚙ Mission Control
+            </button>
           )}
         </main>
       )}
