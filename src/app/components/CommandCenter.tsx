@@ -2,21 +2,20 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { motion } from "framer-motion";
-import { IDENTITIES, FOUNDATION_IDENTITY_MAP } from "@/lib/foundation";
-import type { FoundationType, Identity, ISODate } from "@/lib/foundation";
 import {
   localFoundationRepository,
   calculateDailyFoundationScoreFromActivities,
-  getCompletedFoundationTypesFromActivities,
 } from "@/lib/foundation";
 import type { DailyStateLog } from "@/lib/state-detection";
-import type { CountermeasureRecommendation, CountermeasureLog } from "@/lib/countermeasures";
+import type { CountermeasureRecommendation } from "@/lib/countermeasures";
 import { localCountermeasureRepository, detectThreat, detectNeed } from "@/lib/countermeasures";
 import { COUNTERMEASURES } from "@/lib/countermeasures/config";
 import { audioManager } from "@/lib/audioManager";
+import { getActiveMission, isMissionActive } from "@/lib/mission-mode/modeManager";
+import { listDayLogs } from "@/lib/mission-mode/repository";
 
 interface CommandCenterProps {
-  todaysDate: ISODate;
+  todaysDate: string;
   latestStateLog: DailyStateLog | null;
   todaysStateLogCount: number;
   recommendation: CountermeasureRecommendation | null;
@@ -24,30 +23,16 @@ interface CommandCenterProps {
 }
 
 const sectionVariants = {
-  hidden: { opacity: 0, y: 12 },
+  hidden: { opacity: 0, y: 10 },
   visible: (i: number) => ({
     opacity: 1,
     y: 0,
     transition: {
-      delay: 0.08 * i,
-      duration: 0.5,
+      delay: 0.05 * i,
+      duration: 0.4,
       ease: [0.25, 0.46, 0.45, 0.94],
     },
   }),
-};
-
-const RISK_COLORS: Record<string, string> = {
-  GREEN: "text-emerald-400 border-emerald-400/40 bg-emerald-400/10",
-  YELLOW: "text-warning border-warning/40 bg-warning/10",
-  ORANGE: "text-orange-400 border-orange-400/40 bg-orange-400/10",
-  RED: "text-signal border-signal/40 bg-signal/10",
-};
-
-const RISK_DOT: Record<string, string> = {
-  GREEN: "bg-emerald-400",
-  YELLOW: "bg-warning",
-  ORANGE: "bg-orange-400",
-  RED: "bg-signal",
 };
 
 export default function CommandCenter({
@@ -59,6 +44,7 @@ export default function CommandCenter({
 }: CommandCenterProps) {
   const [clock, setClock] = useState("");
 
+  // Clock tick
   useEffect(() => {
     function tick() {
       setClock(
@@ -76,310 +62,348 @@ export default function CommandCenter({
     return () => clearInterval(id);
   }, []);
 
-  // Read activities
-  const activities = useMemo(
-    () => localFoundationRepository.listFoundationActivities(),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [refreshKey]
-  );
+  // 1. Mission Mode Info
+  const missionActive = useMemo(() => isMissionActive(), [refreshKey]);
+  const activeMission = useMemo(() => getActiveMission(), [refreshKey]);
 
-  const constraintLogs = useMemo(
-    () => localFoundationRepository.listConstraintLogs(),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [refreshKey]
-  );
-
-  const completedFoundations = useMemo(
-    () => getCompletedFoundationTypesFromActivities(activities, todaysDate),
-    [activities, todaysDate]
-  );
-
-  const dailyScore = useMemo(
-    () => calculateDailyFoundationScoreFromActivities(activities, todaysDate),
-    [activities, todaysDate]
-  );
-
-  // Load countermeasure logs to find latest accepted countermeasure today
-  const activeCountermeasure = useMemo(() => {
-    const cmLogs = localCountermeasureRepository.listLogs();
-    const todaysCmLogs = cmLogs.filter((log) => log.date === todaysDate);
-    
-    // Find latest accepted but not completed, or completed log
-    const acceptedLogs = todaysCmLogs.filter((log) => log.accepted);
-    if (acceptedLogs.length === 0) return null;
-    return acceptedLogs[acceptedLogs.length - 1];
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshKey, todaysDate]);
-
-  // Dominant Threat and Need — computed directly from latest state log (Issue 9 fix)
-  // This updates immediately after any check-in, regardless of risk level or recommendation prop
+  // 2. Dominant Threat and Need
   const dominantThreat = useMemo(() => {
     if (!latestStateLog || latestStateLog.selectedStates.length === 0) return null;
-    // V4.2: only run threat detection for limiting thoughts
     const thoughtType = latestStateLog.metadata?.thoughtType ?? null;
     if (thoughtType !== "limiting") return null;
     return detectThreat(latestStateLog.selectedStates);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [latestStateLog, refreshKey]);
+  }, [latestStateLog]);
 
   const dominantNeed = useMemo(() => {
     if (!dominantThreat) return null;
     return detectNeed(dominantThreat.id);
   }, [dominantThreat]);
 
-  // Active identities (multiple allowed)
-  const activeIdentities = useMemo(() => {
-    const active = new Set<Identity>();
+  // 3. Current Countermeasure
+  const activeCountermeasure = useMemo(() => {
+    const cmLogs = localCountermeasureRepository.listLogs();
+    const todaysCmLogs = cmLogs.filter((log) => log.date === todaysDate);
+    const acceptedLogs = todaysCmLogs.filter((log) => log.accepted);
+    if (acceptedLogs.length === 0) return null;
+    return acceptedLogs[acceptedLogs.length - 1];
+  }, [refreshKey, todaysDate]);
 
-    completedFoundations.forEach((f: FoundationType) => {
-      const identity = FOUNDATION_IDENTITY_MAP[f];
-      if (identity) active.add(identity);
-    });
-
-    if (recommendation?.recommendedIdentity) {
-      active.add(recommendation.recommendedIdentity);
+  const countermeasureName = useMemo(() => {
+    if (activeCountermeasure) {
+      const match = COUNTERMEASURES.find((c) => c.id === activeCountermeasure.countermeasureId);
+      return match ? match.name : activeCountermeasure.countermeasureId.replace(/_/g, " ");
     }
+    if (recommendation) {
+      return recommendation.recommendedCountermeasure.name;
+    }
+    return "Standby";
+  }, [activeCountermeasure, recommendation]);
 
-    return active;
-  }, [completedFoundations, recommendation]);
+  // 4. Current Streak Calculation (Unified score >= 60)
+  const currentStreak = useMemo(() => {
+    const getISTDateString = (date: Date) => {
+      const offset = 5.5 * 60 * 60 * 1000;
+      const ist = new Date(date.getTime() + offset);
+      return ist.toISOString().slice(0, 10);
+    };
+    
+    const missionLogs = listDayLogs();
+    const foundationActivities = localFoundationRepository.listFoundationActivities();
+    
+    const getScoreForDate = (dateStr: string) => {
+      const mLog = missionLogs.find(l => l.date === dateStr);
+      if (mLog) return mLog.score;
+      const fScore = calculateDailyFoundationScoreFromActivities(foundationActivities, dateStr as any);
+      return fScore.scorePercent;
+    };
+    
+    let streak = 0;
+    let checkDate = new Date();
+    let currentDateStr = getISTDateString(checkDate);
+    
+    if (getScoreForDate(currentDateStr) < 60) {
+      checkDate.setDate(checkDate.getDate() - 1);
+      currentDateStr = getISTDateString(checkDate);
+    }
+    
+    let limit = 365;
+    while (limit > 0) {
+      const score = getScoreForDate(currentDateStr);
+      if (score >= 60) {
+        streak++;
+        checkDate.setDate(checkDate.getDate() - 1);
+        currentDateStr = getISTDateString(checkDate);
+      } else {
+        break;
+      }
+      limit--;
+    }
+    return streak;
+  }, [refreshKey, todaysDate]);
 
-  const constraintStatus = useMemo(() => {
-    const todaysEntry = constraintLogs.find(
-      (log) => log.date === todaysDate && log.constraint === "No Porn"
-    );
+  // 5. Interactive Focus Timer (Pomodoro)
+  const [timerSeconds, setTimerSeconds] = useState(25 * 60);
+  const [timerRunning, setTimerRunning] = useState(false);
+  const [timerMode, setTimerMode] = useState<"focus" | "break">("focus");
 
-    if (!todaysEntry) return "PENDING" as const;
-    if (todaysEntry.subtype === "Yes" && todaysEntry.completed)
-      return "CLEAN" as const;
-    if (todaysEntry.subtype === "No") return "FAILED" as const;
-    return "PENDING" as const;
-  }, [constraintLogs, todaysDate]);
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout | null = null;
+    if (timerRunning) {
+      intervalId = setInterval(() => {
+        setTimerSeconds((prev) => {
+          if (prev <= 1) {
+            setTimerRunning(false);
+            audioManager.playCheckinComplete();
+            // trigger custom sound or notification
+            if (typeof window !== "undefined") {
+              try {
+                const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                osc.type = "sine";
+                osc.frequency.setValueAtTime(600, ctx.currentTime);
+                osc.connect(ctx.destination);
+                osc.start();
+                osc.stop(ctx.currentTime + 0.35);
+              } catch (e) {
+                // AudioContext blocked or not supported
+              }
+            }
+            return timerMode === "focus" ? 5 * 60 : 25 * 60;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [timerRunning, timerMode]);
 
-  let sectionIndex = 0;
+  const toggleTimer = () => {
+    audioManager.playClick();
+    setTimerRunning(!timerRunning);
+  };
+
+  const resetTimer = () => {
+    audioManager.playClick();
+    setTimerRunning(false);
+    setTimerSeconds(timerMode === "focus" ? 25 * 60 : 5 * 60);
+  };
+
+  const switchTimerMode = (mode: "focus" | "break") => {
+    audioManager.playClick();
+    setTimerRunning(false);
+    setTimerMode(mode);
+    setTimerSeconds(mode === "focus" ? 25 * 60 : 5 * 60);
+  };
+
+  const formattedTimer = useMemo(() => {
+    const mins = Math.floor(timerSeconds / 60);
+    const secs = timerSeconds % 60;
+    return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  }, [timerSeconds]);
+
+  // Unified Status Check
+  const statusLabel = useMemo(() => {
+    if (dominantThreat) return "THREAT DETECTED";
+    if (missionActive) return "MISSION ACTIVE";
+    return "ALL SYSTEMS STABLE";
+  }, [dominantThreat, missionActive]);
+
+  const statusColor = useMemo(() => {
+    if (dominantThreat) return "text-signal glow-text-red border-signal/30 bg-signal/5";
+    if (missionActive) return "text-amber-400 glow-text-amber border-amber-400/30 bg-amber-400/[0.02]";
+    return "text-emerald-400 glow-text-emerald border-emerald-400/30 bg-emerald-500/[0.01]";
+  }, [dominantThreat, missionActive]);
+
+  let sectionIdx = 0;
 
   return (
     <div className="panel flex min-h-0 flex-col p-4">
-      {/* Header */}
+      {/* Title & Clock Header */}
       <motion.div
-        className="mb-4 flex items-start justify-between"
+        className="mb-4 flex items-start justify-between border-b border-white/5 pb-2"
         variants={sectionVariants}
         initial="hidden"
         animate="visible"
-        custom={sectionIndex++}
+        custom={sectionIdx++}
       >
         <div>
-          <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-signal/80">
-            Right Array
+          <p className="font-mono text-[9px] uppercase tracking-[0.24em] text-white/30">
+            Wayne Ent. / Operations
           </p>
-          <h2 className="font-display text-xl uppercase text-frost sm:text-2xl">
+          <h2 className="font-display text-lg uppercase tracking-wide text-white">
             Command Center
           </h2>
         </div>
-        <span className="font-mono text-lg tabular-nums text-signal glow-text-red">
+        <span className="font-mono text-sm tabular-nums text-signal/85 tracking-wider">
           {clock}
         </span>
       </motion.div>
 
-      {/* Identity Activation Grid */}
-      <motion.div
-        className="mb-3 grid grid-cols-2 gap-2"
-        variants={sectionVariants}
-        initial="hidden"
-        animate="visible"
-        custom={sectionIndex++}
-      >
-        {IDENTITIES.map((identity) => {
-          const isActive = activeIdentities.has(identity);
-          const isCountermeasureTarget =
-            recommendation?.recommendedIdentity === identity;
+      {/* Grid of strict fields */}
+      <div className="flex-1 flex flex-col gap-3 justify-between">
+        
+        {/* 1. MISSION STATUS */}
+        <motion.div
+          className={`border p-3 text-center transition-all ${statusColor}`}
+          variants={sectionVariants}
+          initial="hidden"
+          animate="visible"
+          custom={sectionIdx++}
+        >
+          <span className="block font-mono text-[8px] uppercase tracking-[0.2em] text-white/30">
+            System Status
+          </span>
+          <p className="mt-1 font-display text-sm sm:text-base uppercase tracking-widest font-bold">
+            {statusLabel}
+          </p>
+        </motion.div>
 
-          return (
-            <div
-              key={identity}
-              className={`relative px-3 py-3.5 text-center font-display text-xs sm:text-sm uppercase transition-all duration-300 ${
-                isActive
-                  ? "border border-signal/50 bg-signal/10 text-white shadow-[0_0_20px_rgba(255,42,42,0.12)]"
-                  : "border border-white/10 bg-white/[0.03] text-white/40"
-              }`}
-            >
-              {identity}
-              {isCountermeasureTarget && (
-                <span className="mt-1 block font-mono text-[9px] tracking-wider text-signal animate-pulse">
-                  ▸ ACTIVATED
-                </span>
-              )}
-            </div>
-          );
-        })}
-      </motion.div>
-
-      {/* ── MISSION CONTROL PANEL ── */}
-      <motion.div
-        className="mb-3 border border-white/8 bg-black/40 p-3 space-y-2.5 font-mono text-xs"
-        variants={sectionVariants}
-        initial="hidden"
-        animate="visible"
-        custom={sectionIndex++}
-      >
-        <div>
-          <span className="block text-[9px] uppercase tracking-wider text-white/30">Primary Mission</span>
-          {activeCountermeasure ? (
-            <p className="font-display text-base uppercase text-signal glow-text-red leading-tight">
-              {COUNTERMEASURES.find((c) => c.id === activeCountermeasure.countermeasureId)?.name ?? activeCountermeasure.countermeasureId.replace(/_/g, " ")}
-            </p>
-          ) : recommendation ? (
-            <p className="font-display text-base uppercase text-signal glow-text-red leading-tight">
-              {recommendation.missionRedirect}
-            </p>
-          ) : (
-            <p className="font-display text-base uppercase text-white/35 leading-tight">Standing By</p>
-          )}
-        </div>
-
-        <div className="grid grid-cols-2 gap-2 pt-1.5 border-t border-white/5">
+        {/* 2. Objective & Mission Info */}
+        <motion.div
+          className="border border-white/6 bg-black/35 p-3 space-y-2 font-mono text-xs"
+          variants={sectionVariants}
+          initial="hidden"
+          animate="visible"
+          custom={sectionIdx++}
+        >
           <div>
-            <span className="block text-[8px] uppercase tracking-wider text-white/30">Active Action</span>
+            <span className="block text-[8px] uppercase tracking-wider text-white/30">
+              Current Mission
+            </span>
             <p className="font-display text-[11px] uppercase text-white truncate">
-              {activeCountermeasure
-                ? `[${activeCountermeasure.metadata?.outcome || "ACTIVE"}]`
-                : "None Deploy"}
+              {missionActive && activeMission ? activeMission.name : "None"}
             </p>
           </div>
-          <div>
-            <span className="block text-[8px] uppercase tracking-wider text-white/30">Active Protocol</span>
+          <div className="border-t border-white/5 pt-1.5">
+            <span className="block text-[8px] uppercase tracking-wider text-white/30">
+              Current Objective
+            </span>
             <p className="font-display text-[11px] uppercase text-frost truncate">
-              {activeCountermeasure
-                ? activeCountermeasure.countermeasureId.replace(/_/g, " ")
-                : recommendation
-                  ? recommendation.recommendedCountermeasure.name
-                  : "Standby"}
+              {missionActive && activeMission ? (activeMission.customObjective ?? activeMission.objective) : "Standing By"}
             </p>
           </div>
-        </div>
+        </motion.div>
 
-        <div className="grid grid-cols-2 gap-2 pt-1.5 border-t border-white/5">
+        {/* 3. Threats & Countermeasures */}
+        <motion.div
+          className="grid grid-cols-2 gap-2 border border-white/6 bg-black/35 p-3 font-mono text-xs"
+          variants={sectionVariants}
+          initial="hidden"
+          animate="visible"
+          custom={sectionIdx++}
+        >
           <div>
-            <span className="block text-[8px] uppercase tracking-wider text-white/30">Dominant Threat</span>
-            <p className="font-display text-[11px] uppercase text-white truncate">
+            <span className="block text-[8px] uppercase tracking-wider text-white/30">
+              Current Threat
+            </span>
+            <p className={`font-display text-[10px] uppercase truncate ${dominantThreat ? "text-signal" : "text-white/40"}`}>
               {dominantThreat ? dominantThreat.name : "None Scan"}
             </p>
           </div>
           <div>
-            <span className="block text-[8px] uppercase tracking-wider text-white/30">Dominant Need</span>
-            <p className="font-display text-[11px] uppercase text-frost truncate">
-              {dominantNeed ? dominantNeed.name : "None Detect"}
+            <span className="block text-[8px] uppercase tracking-wider text-white/30">
+              Countermeasure
+            </span>
+            <p className={`font-display text-[10px] uppercase truncate ${activeCountermeasure ? "text-emerald-400" : recommendation ? "text-amber-400" : "text-white/40"}`}>
+              {countermeasureName}
             </p>
           </div>
-        </div>
-      </motion.div>
+        </motion.div>
 
-      {/* Constraints & Risk Level */}
-      <motion.div
-        className="mb-3 grid grid-cols-2 gap-2"
-        variants={sectionVariants}
-        initial="hidden"
-        animate="visible"
-        custom={sectionIndex++}
-      >
-        {/* No-Porn Constraint */}
-        <div className="border border-white/8 bg-black/40 p-3">
-          <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-white/40">
-            No Porn
-          </p>
-          <p
-            className={`mt-1 flex items-center gap-1.5 font-display text-lg uppercase ${
-              constraintStatus === "CLEAN"
-                ? "text-emerald-400"
-                : constraintStatus === "FAILED"
-                  ? "text-red-400"
-                  : "text-amber-400/60"
-            }`}
-          >
-            <span
-              className={`inline-block h-2 w-2 rounded-full ${
-                constraintStatus === "CLEAN"
-                  ? "bg-emerald-400"
-                  : constraintStatus === "FAILED"
-                    ? "bg-red-400"
-                    : "bg-amber-400/60"
-              }`}
-            />
-            {constraintStatus}
-          </p>
-        </div>
-
-        {/* Risk Level */}
-        <div className="border border-white/8 bg-black/40 p-3">
-          <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-white/40">
-            Risk Level
-          </p>
-          {latestStateLog ? (
-            <p className="mt-1 flex items-center gap-1.5 font-display text-lg uppercase">
-              <span
-                className={`inline-block h-2 w-2 rounded-full ${RISK_DOT[latestStateLog.riskLevel] ?? "bg-white/30"}`}
-              />
-              <span
-                className={
-                  RISK_COLORS[latestStateLog.riskLevel]
-                    ?.split(" ")
-                    .find((c) => c.startsWith("text-")) ?? "text-white/40"
-                }
-              >
-                {latestStateLog.riskLevel}
-              </span>
-            </p>
-          ) : (
-            <p className="mt-1 font-display text-lg uppercase text-white/30">
-              No Data
-            </p>
-          )}
-        </div>
-      </motion.div>
-
-      {/* Stats Row: Check-ins · Foundation Score */}
-      <motion.div
-        className="grid grid-cols-2 gap-2"
-        variants={sectionVariants}
-        initial="hidden"
-        animate="visible"
-        custom={sectionIndex++}
-      >
-        {/* Check-in Count */}
-        <div className="border border-white/8 bg-black/40 p-3">
-          <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-white/40">
-            Check-ins
-          </p>
-          <p className="mt-1 font-display text-lg uppercase text-white">
-            {todaysStateLogCount}
-            <span className="ml-1 font-mono text-[9px] tracking-wider text-white/40">
-              today
+        {/* 4. Streak Counter */}
+        <motion.div
+          className="border border-white/6 bg-black/35 p-3 font-mono text-xs flex justify-between items-center"
+          variants={sectionVariants}
+          initial="hidden"
+          animate="visible"
+          custom={sectionIdx++}
+        >
+          <div>
+            <span className="block text-[8px] uppercase tracking-wider text-white/30">
+              Current Streak
             </span>
-          </p>
-        </div>
-
-        {/* Foundation Score */}
-        <div className="border border-white/8 bg-black/40 p-3">
-          <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-white/40">
-            Foundation
-          </p>
-          <div className="mt-1 flex items-center gap-2">
-            <p className="font-display text-lg uppercase text-white">
-              {dailyScore.completedCount}/{dailyScore.totalFoundations}
+            <p className="font-display text-lg uppercase text-white leading-tight mt-0.5">
+              {currentStreak} <span className="text-[10px] text-white/40">Days</span>
             </p>
-            {/* Progress meter */}
-            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
-              <motion.div
-                className="h-full rounded-full bg-signal/70"
-                initial={{ width: 0 }}
-                animate={{
-                  width: `${(dailyScore.completedCount / dailyScore.totalFoundations) * 100}%`,
-                }}
-                transition={{ duration: 0.8, ease: "easeOut", delay: 0.3 }}
-              />
+          </div>
+          <span className="text-xl">🔥</span>
+        </motion.div>
+
+        {/* 5. Focus Timer */}
+        <motion.div
+          className="border border-white/6 bg-black/35 p-3 space-y-2.5"
+          variants={sectionVariants}
+          initial="hidden"
+          animate="visible"
+          custom={sectionIdx++}
+        >
+          <div className="flex justify-between items-baseline">
+            <span className="font-mono text-[8px] uppercase tracking-wider text-white/30">
+              Current Focus Timer
+            </span>
+            <div className="flex gap-1.5 text-[8px] font-mono uppercase">
+              <button
+                type="button"
+                onClick={() => switchTimerMode("focus")}
+                className={`px-1.5 py-0.5 border ${
+                  timerMode === "focus"
+                    ? "border-amber-400/40 bg-amber-400/10 text-amber-400"
+                    : "border-white/5 text-white/30 hover:text-white"
+                }`}
+              >
+                Focus
+              </button>
+              <button
+                type="button"
+                onClick={() => switchTimerMode("break")}
+                className={`px-1.5 py-0.5 border ${
+                  timerMode === "break"
+                    ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-400"
+                    : "border-white/5 text-white/30 hover:text-white"
+                }`}
+              >
+                Break
+              </button>
             </div>
           </div>
-        </div>
-      </motion.div>
+
+          <div className="flex items-center justify-between">
+            <span className={`font-display text-2xl tabular-nums leading-none ${
+              timerRunning
+                ? timerMode === "focus"
+                  ? "text-amber-400 animate-pulse"
+                  : "text-emerald-400 animate-pulse"
+                : "text-white"
+            }`}>
+              {formattedTimer}
+            </span>
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={toggleTimer}
+                className={`px-3 py-1 border font-mono text-[9px] uppercase tracking-wider transition-colors ${
+                  timerRunning
+                    ? "border-signal/50 bg-signal/10 text-signal hover:bg-signal/20"
+                    : "border-emerald-400/50 bg-emerald-400/10 text-emerald-400 hover:bg-emerald-400/20"
+                }`}
+              >
+                {timerRunning ? "Pause" : "Start"}
+              </button>
+              <button
+                type="button"
+                onClick={resetTimer}
+                className="px-2.5 py-1 border border-white/10 bg-white/[0.03] text-white/50 hover:text-white font-mono text-[9px] uppercase tracking-wider"
+              >
+                Reset
+              </button>
+            </div>
+          </div>
+        </motion.div>
+
+      </div>
     </div>
   );
 }

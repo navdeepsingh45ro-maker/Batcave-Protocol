@@ -70,6 +70,18 @@ export default function CountermeasurePanel({
   latestStateLog,
   onCountermeasureActioned,
 }: CountermeasurePanelProps) {
+  const [isCollapsed, setIsCollapsed] = useState(true);
+  const [userToggled, setUserToggled] = useState(false);
+
+  useEffect(() => {
+    if (!userToggled) {
+      const isThreatActive = latestStateLog !== null && latestStateLog.riskScore >= 10;
+      if (isThreatActive) {
+        setIsCollapsed(false);
+      }
+    }
+  }, [latestStateLog, userToggled]);
+
   // ── V4.5: Mission state ────────────────────────────────────────
   const [mission, setMission]       = useState<MissionState | null>(null);
   const [missionPhase, setMissionPhase] = useState<MissionPhase>("dormant");
@@ -278,14 +290,40 @@ export default function CountermeasurePanel({
       isActive ? "border-signal/15 shadow-[0_0_30px_rgba(255,42,42,0.08)]" : ""
     }`}>
       {/* Header */}
-      <div className="mb-4">
-        <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-signal/80">
-          System 3 — Countermeasures
-        </p>
-        <h2 className="font-display text-xl uppercase text-frost sm:text-2xl">
-          Countermeasure Dispatch
-        </h2>
+      <div 
+        onClick={() => {
+          audioManager.playClick();
+          setIsCollapsed(!isCollapsed);
+          setUserToggled(true);
+        }}
+        className="mb-4 flex items-center justify-between cursor-pointer select-none"
+      >
+        <div>
+          <p className="font-mono text-[9px] uppercase tracking-[0.24em] text-signal/80">
+            System 3 — Countermeasures
+          </p>
+          <h2 className="font-display text-lg uppercase text-frost flex items-center gap-2">
+            <span>Countermeasure Dispatch</span>
+            <span className="text-white/20 text-xs">{isCollapsed ? "▼" : "▲"}</span>
+          </h2>
+        </div>
+        {isActive && (
+          <span className="px-2 py-0.5 border border-signal/40 bg-signal/10 text-signal font-mono text-[9px] uppercase tracking-wider animate-pulse">
+            Threat Active
+          </span>
+        )}
       </div>
+
+      <AnimatePresence>
+        {!isCollapsed ? (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="flex-1 flex flex-col min-h-0 overflow-hidden"
+            key="countermeasures-expanded"
+          >
 
       {/* ═══════════════════════════════════════════════════════════
           MISSION PHASES
@@ -759,6 +797,13 @@ export default function CountermeasurePanel({
           )}
         </AnimatePresence>
       </div>
+    </motion.div>
+  ) : (
+    <div className="font-mono text-[10px] text-white/35 uppercase tracking-wider mt-1 pl-1 select-none">
+      Standing By · Protocol Status: {isActive ? "ALERT / ESCALATED" : "STABLE"}
     </div>
+  )}
+</AnimatePresence>
+</div>
   );
 }

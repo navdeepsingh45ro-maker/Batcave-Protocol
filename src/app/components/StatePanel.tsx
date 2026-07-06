@@ -86,6 +86,21 @@ function clearDraft() {
 }
 
 export default function StatePanel({ todaysDate, onStateCheckedIn }: StatePanelProps) {
+  const [isCollapsed, setIsCollapsed] = useState(true);
+  const [userToggled, setUserToggled] = useState(false);
+
+  useEffect(() => {
+    if (!userToggled) {
+      const logs = localStateDetectionRepository.getStateLogsForDate(todaysDate);
+      const hasLogs = logs.length > 0;
+      const latest = logs.length > 0 ? logs[logs.length - 1] : null;
+      const isThreat = latest && latest.riskScore >= 10;
+      if (hasLogs || isThreat) {
+        setIsCollapsed(false);
+      }
+    }
+  }, [todaysDate, userToggled]);
+
   // ── Restore draft on mount ────────────────────────────────
   const [step, setStep]                     = useState<number>(() => loadDraft()?.step ?? 1);
   // V4.4: Single dominant state — still array for migration compat
@@ -268,43 +283,66 @@ export default function StatePanel({ todaysDate, onStateCheckedIn }: StatePanelP
   return (
     <div className="panel flex min-h-0 flex-col p-4 relative">
       {/* ── Header ─────────────────────────────────────────── */}
-      <div className="mb-4 flex items-center justify-between">
+      <div 
+        onClick={() => {
+          audioManager.playClick();
+          setIsCollapsed(!isCollapsed);
+          setUserToggled(true);
+        }}
+        className="mb-4 flex items-center justify-between cursor-pointer select-none"
+      >
         <div>
-          <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-signal/80">
+          <p className="font-mono text-[9px] uppercase tracking-[0.24em] text-signal/80">
             System 2 — Belief Intelligence
           </p>
-          <h2 className="font-display text-xl uppercase text-frost sm:text-2xl">
-            {showMatrixManager ? "Decision Matrix" : "Neural Check-In"}
+          <h2 className="font-display text-lg uppercase text-frost flex items-center gap-2">
+            <span>{showMatrixManager ? "Decision Matrix" : "Neural Check-In"}</span>
+            <span className="text-white/20 text-xs">{isCollapsed ? "▼" : "▲"}</span>
           </h2>
         </div>
         <button
           type="button"
-          onClick={() => { audioManager.playToggle(); setShowMatrixManager(!showMatrixManager); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            audioManager.playToggle();
+            setShowMatrixManager(!showMatrixManager);
+            setIsCollapsed(false);
+          }}
           className="px-2.5 py-1 border border-white/10 bg-white/[0.02] hover:bg-white/5 font-mono text-[9px] uppercase tracking-wider text-frost transition-all duration-200"
         >
           {showMatrixManager ? "▸ Check-In" : "⚙ Matrix"}
         </button>
       </div>
 
-      {/* ── Draft recovery banner ───────────────────────────── */}
-      {!showMatrixManager && step > 1 && (
-        <div className="mb-3 flex items-center gap-2 border border-warning/20 bg-warning/[0.03] px-3 py-1.5">
-          <span className="font-mono text-[9px] uppercase tracking-wider text-warning/70">
-            ⏱ Draft — Step {step} of 5
-          </span>
-          <button
-            type="button"
-            onClick={() => {
-              clearDraft(); setStep(1); setSelectedStates([]);
-              setPrimaryCause(null); setDominantThought(""); setThoughtType(null);
-              audioManager.playClick();
-            }}
-            className="ml-auto font-mono text-[8px] uppercase text-white/30 hover:text-signal transition-colors"
+      <AnimatePresence>
+        {!isCollapsed ? (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="flex-1 flex flex-col min-h-0 overflow-hidden"
+            key="expanded-content"
           >
-            × Discard
-          </button>
-        </div>
-      )}
+            {/* ── Draft recovery banner ───────────────────────────── */}
+            {!showMatrixManager && step > 1 && (
+              <div className="mb-3 flex items-center gap-2 border border-warning/20 bg-warning/[0.03] px-3 py-1.5">
+                <span className="font-mono text-[9px] uppercase tracking-wider text-warning/70">
+                  ⏱ Draft — Step {step} of 5
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearDraft(); setStep(1); setSelectedStates([]);
+                    setPrimaryCause(null); setDominantThought(""); setThoughtType(null);
+                    audioManager.playClick();
+                  }}
+                  className="ml-auto font-mono text-[8px] uppercase text-white/30 hover:text-signal transition-colors"
+                >
+                  × Discard
+                </button>
+              </div>
+            )}
 
       {/* ═══════════════════════════════════════════════════════
           MATRIX MANAGER VIEW
@@ -818,6 +856,13 @@ export default function StatePanel({ todaysDate, onStateCheckedIn }: StatePanelP
           </div>
         </div>
       )}
-    </div>
+    </motion.div>
+    ) : (
+      <div className="font-mono text-[10px] text-white/35 uppercase tracking-wider mt-1 pl-1 select-none">
+        Standing By · Logs today: {localStateDetectionRepository.getStateLogsForDate(todaysDate).length}
+      </div>
+    )}
+  </AnimatePresence>
+</div>
   );
 }
