@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import BootSequence from "./BootSequence";
 import StatePanel from "./StatePanel";
+import DecisionMetricsPanel from "./DecisionMetricsPanel";
 import CountermeasurePanel from "./CountermeasurePanel";
 import CommandCenter from "./CommandCenter";
 import IntelligencePanel from "./IntelligencePanel";
@@ -389,14 +390,12 @@ export default function Dashboard() {
     return !anyInProgress && !isThreat && !isNoPornFailed;
   }, [activeDayLog, latestStateLog, constraintStatus]);
 
-  // Intelligence section visibility:
+  // Bottom action visibility:
   const [userExpandedIntelligence, setUserExpandedIntelligence] = useState(false);
 
   const autoExpandIntelligence = useMemo(() => {
-    const hasCheckins = activeDateStateLogs.length > 0;
-    const isThreat = latestStateLog !== null && latestStateLog.riskScore >= 10;
-    return hasCheckins || isThreat;
-  }, [activeDateStateLogs, latestStateLog]);
+    return latestStateLog !== null && latestStateLog.riskScore >= 10;
+  }, [latestStateLog]);
 
   const showIntelligence = userExpandedIntelligence || autoExpandIntelligence;
 
@@ -647,6 +646,7 @@ export default function Dashboard() {
                   </div>
 
                   {/* ───────────────── CENTER ZONE ───────────────── */}
+                  {/* SYSTEM 1 — OPERATIONS */}
                   <div className="space-y-3">
                     <div className="flex justify-between items-baseline border-b border-white/10 pb-1">
                       <div className="flex items-center gap-2">
@@ -728,6 +728,29 @@ export default function Dashboard() {
                     </div>
                   </div>
 
+                  {/* SYSTEM 2 — BELIEF INTELLIGENCE & DECISION METRICS (Always Visible) */}
+                  <div className="space-y-3 mt-4">
+                    <div className="flex items-center gap-2 border-b border-white/10 pb-1">
+                      <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-white/30">
+                        System 2 — Belief Intelligence
+                      </p>
+                      <h2 className="font-display text-xl uppercase text-frost sm:text-2xl">
+                        Cognitive Diagnostic
+                      </h2>
+                    </div>
+
+                    <div className="grid gap-3 grid-cols-1 lg:grid-cols-2">
+                      <StatePanel
+                        todaysDate={activeDate}
+                        onStateCheckedIn={handleStateCheckedIn}
+                      />
+                      <DecisionMetricsPanel
+                        todaysDate={activeDate}
+                        refreshKey={refreshKey}
+                      />
+                    </div>
+                  </div>
+
                   {/* ───────────────── BOTTOM ZONE ───────────────── */}
                   <div className="mt-6 border-t border-white/10 pt-4">
                     <div 
@@ -738,13 +761,13 @@ export default function Dashboard() {
                       className="flex justify-between items-center cursor-pointer select-none border border-white/8 bg-black/45 px-4 py-3 hover:bg-black/60 transition-all mb-4"
                     >
                       <div className="flex items-center gap-3">
-                        <span className="text-xl">🕵️‍♂️</span>
+                        <span className="text-xl">🛡️</span>
                         <div>
                           <h3 className="font-display text-sm uppercase tracking-wider text-white">
-                            Intelligence Corps & Analytics
+                            Action Dispatches & System Analytics
                           </h3>
                           <p className="font-mono text-[9px] text-white/30 uppercase tracking-widest mt-0.5">
-                            Neural state assessments · Countermeasure logs · History logs
+                            Countermeasure dispatches · Momentum flags · History charts
                           </p>
                         </div>
                       </div>
@@ -764,14 +787,6 @@ export default function Dashboard() {
                           exit={{ height: 0, opacity: 0 }}
                           className="grid gap-3 grid-cols-1 lg:grid-cols-2"
                         >
-                          {/* State check-in (Neural Check-in) */}
-                          <div className="flex min-h-0 flex-col">
-                            <StatePanel
-                              todaysDate={activeDate}
-                              onStateCheckedIn={handleStateCheckedIn}
-                            />
-                          </div>
-                          
                           {/* Countermeasure dispatch */}
                           <div className="flex min-h-0 flex-col">
                             <CountermeasurePanel
@@ -800,7 +815,7 @@ export default function Dashboard() {
                           </div>
                           
                           {/* History */}
-                          <div className="flex min-h-0 flex-col">
+                          <div className="flex min-h-0 flex-col lg:col-span-2">
                             <MissionHistoryPanel refreshKey={refreshKey} />
                           </div>
                         </motion.div>

@@ -74,6 +74,12 @@ export const localStateDetectionRepository = {
     return nextLog;
   },
 
+  deleteStateLog(id: string): void {
+    const logs = this.listStateLogs();
+    const nextLogs = logs.filter((l) => l.id !== id);
+    writeJson(STATE_LOG_STORAGE_KEY, nextLogs);
+  },
+
   listBehaviorOutcomes(): BehaviorOutcome[] {
     return readJson<BehaviorOutcome[]>(BEHAVIOR_OUTCOME_STORAGE_KEY, []);
   },
