@@ -116,28 +116,30 @@ export default function StatePanel({ todaysDate, onStateCheckedIn }: StatePanelP
   };
 
   return (
-    <div className="panel flex min-h-0 flex-col p-4 relative bg-black/40 border-white/8">
+    <div className="w-full">
       {/* Header */}
       <div 
         onClick={() => {
-          audioManager.playClick();
-          setIsCollapsed(!isCollapsed);
+          if (latest) {
+            audioManager.playClick();
+            setIsCollapsed(!isCollapsed);
+          }
         }}
-        className="mb-4 flex items-center justify-between cursor-pointer select-none"
+        className={`mb-4 flex items-center justify-between ${latest ? "cursor-pointer select-none" : ""}`}
       >
         <div>
-          <p className="font-mono text-[9px] uppercase tracking-[0.24em] text-signal/80">
-            System 2 — Belief Intelligence
+          <p className="font-mono text-[9px] uppercase tracking-[0.24em] text-white/30">
+            System 2
           </p>
-          <h2 className="font-display text-lg uppercase text-frost flex items-center gap-2">
+          <h2 className="font-display text-lg uppercase text-white/80 flex items-center gap-2">
             <span>Neural Check-In</span>
-            <span className="text-white/20 text-xs">{isCollapsed ? "▼" : "▲"}</span>
+            {latest && <span className="text-white/20 text-xs">{isCollapsed ? "▼" : "▲"}</span>}
           </h2>
         </div>
       </div>
 
       <AnimatePresence>
-        {!isCollapsed ? (
+        {!isCollapsed || !latest ? (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
@@ -146,34 +148,37 @@ export default function StatePanel({ todaysDate, onStateCheckedIn }: StatePanelP
           >
             {latest ? (
               /* Checked-In Result View */
-              <div className="space-y-3 font-mono text-xs animate-fade-in">
-                <div className="border border-emerald-500/30 bg-emerald-500/5 p-3 flex justify-between items-center">
-                  <span className="text-emerald-400 uppercase tracking-widest text-[10px]">Neural State Locked</span>
-                  <span className="text-emerald-400">✓</span>
+              <div className="space-y-3 font-mono text-xs animate-fade-in pl-2">
+                <div className="flex items-center gap-2 text-emerald-400">
+                  <span className="text-[10px] uppercase tracking-widest">Neural State Locked</span>
+                  <span>✓</span>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3 border border-white/5 bg-black/25 p-3">
-                  <div>
-                    <span className="block text-[8px] uppercase tracking-wider text-white/30">Dominant State</span>
-                    <span className="text-white font-bold">{latest.selectedStates[0] || "None"}</span>
+                <div className="flex flex-wrap gap-4 mt-2">
+                  <div className="bg-white/5 border border-white/10 px-3 py-1.5">
+                    <span className="text-[8px] uppercase tracking-wider text-white/40 block">State</span>
+                    <span className="text-white">{latest.selectedStates[0] || "None"}</span>
                   </div>
-                  <div>
-                    <span className="block text-[8px] uppercase tracking-wider text-white/30">Primary Cause</span>
-                    <span className="text-white/70">{(latest.metadata?.primaryCause as string) || "None"}</span>
-                  </div>
-                </div>
-
-                <div className="border border-white/5 bg-white/[0.02] p-3 space-y-2">
-                  <span className="block text-[8px] uppercase tracking-wider text-white/30">Dominant Thought</span>
-                  <p className="text-white/70 italic">"{(latest.metadata?.dominantThought as string) || "None"}"</p>
+                  {(latest.metadata?.dominantThought as string) && (
+                    <div className="bg-white/5 border border-white/10 px-3 py-1.5 flex-1 min-w-[200px]">
+                      <span className="text-[8px] uppercase tracking-wider text-white/40 block">Thought</span>
+                      <span className="text-white/70 italic">{(latest.metadata?.dominantThought as string)}</span>
+                    </div>
+                  )}
+                  {(latest.metadata?.primaryCause as string) && (
+                    <div className="bg-white/5 border border-white/10 px-3 py-1.5">
+                      <span className="text-[8px] uppercase tracking-wider text-white/40 block">Cause</span>
+                      <span className="text-white/70">{(latest.metadata?.primaryCause as string)}</span>
+                    </div>
+                  )}
                 </div>
 
                 <button
                   type="button"
                   onClick={handleRecheck}
-                  className="w-full py-2 mt-2 border border-white/10 bg-white/[0.02] hover:bg-white/5 font-mono text-[9px] uppercase tracking-wider text-white/60 hover:text-white transition-all"
+                  className="mt-2 text-white/30 hover:text-white transition-colors font-mono text-[9px] uppercase tracking-wider"
                 >
-                  ↻ Recheck-In
+                  [ Edit Check-In ]
                 </button>
               </div>
             ) : (

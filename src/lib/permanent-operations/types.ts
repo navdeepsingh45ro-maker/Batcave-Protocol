@@ -1,7 +1,10 @@
+export type ProtocolIdentity = "Builder" | "Striker" | "King" | "Guardian";
+
 export interface PermanentOperation {
   id: string;
   name: string;
   description?: string;
+  identity: ProtocolIdentity;
   order: number;
   archived: boolean;
   createdAt: string;

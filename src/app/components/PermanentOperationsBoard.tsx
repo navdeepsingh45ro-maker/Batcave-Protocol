@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { permanentOperationsRepository, PermanentOperation, OperationLog, OperationStatus } from "@/lib/permanent-operations";
+import { permanentOperationsRepository, PermanentOperation, OperationLog, OperationStatus, ProtocolIdentity } from "@/lib/permanent-operations";
 import { audioManager } from "@/lib/audioManager";
 import type { ISODate } from "@/lib/foundation/types";
 
@@ -23,7 +23,16 @@ export default function PermanentOperationsBoard({ todaysDate }: Props) {
   // Edit mode states
   const [newOpName, setNewOpName] = useState("");
   const [newOpDesc, setNewOpDesc] = useState("");
+  const [newOpIdentity, setNewOpIdentity] = useState<ProtocolIdentity>("Builder");
   const [showArchived, setShowArchived] = useState(false);
+  
+  // Expanded state for identities
+  const [expandedIdentities, setExpandedIdentities] = useState<Record<ProtocolIdentity, boolean>>({
+    Builder: false,
+    Striker: false,
+    King: false,
+    Guardian: false,
+  });
 
   const loadData = useCallback(() => {
     const allOps = permanentOperationsRepository.listOperations();
@@ -101,7 +110,7 @@ export default function PermanentOperationsBoard({ todaysDate }: Props) {
   const handleCreateOperation = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newOpName.trim()) return;
-    permanentOperationsRepository.createOperation(newOpName.trim(), newOpDesc.trim() || undefined);
+    permanentOperationsRepository.createOperation(newOpName.trim(), newOpDesc.trim() || undefined, newOpIdentity);
     setNewOpName("");
     setNewOpDesc("");
     loadData();
@@ -144,10 +153,10 @@ export default function PermanentOperationsBoard({ todaysDate }: Props) {
       <div className="flex justify-between items-end border-b border-white/5 pb-2">
         <div>
           <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-white/30">
-            Mandatory Directives
+            Core Framework
           </p>
           <h2 className="font-display text-xl uppercase tracking-wider text-frost mt-1">
-            Permanent Operations
+            Identity Directives
           </h2>
         </div>
         <button
@@ -161,145 +170,202 @@ export default function PermanentOperationsBoard({ todaysDate }: Props) {
       </div>
 
       {/* Board */}
-      <div className="flex flex-col">
-        <AnimatePresence>
-          {operations.map((op, idx) => {
-            const log = getLogForOp(op.id);
-            const status = log?.status || "pending";
-            
-            let currentDuration = log?.durationMs || 0;
-            if (status === "active" && log?.lastResumedAt) {
-              const elapsed = Math.max(0, nowMs - new Date(log.lastResumedAt).getTime());
-              currentDuration += elapsed;
-            }
+      <div className="flex flex-col gap-4">
+        {(["Builder", "Striker", "King", "Guardian"] as ProtocolIdentity[]).map((identity) => {
+          const identityOps = operations.filter((op) => op.identity === identity);
+          if (identityOps.length === 0 && !editMode) return null;
 
-            let statusColor = "bg-transparent text-white/40";
-            let statusLabel = "PENDING";
-            
-            if (status === "active") {
-              statusColor = "bg-amber-400/5 text-amber-400";
-              statusLabel = "ACTIVE";
-            } else if (status === "completed") {
-              statusColor = "bg-emerald-500/5 text-emerald-400";
-              statusLabel = "COMPLETED";
-            } else if (status === "skipped") {
-              statusColor = "bg-red-500/5 text-red-500/60";
-              statusLabel = "SKIPPED";
-            }
+          const isExpanded = expandedIdentities[identity];
 
-            return (
-              <motion.div
-                layout
-                initial={{ opacity: 0, y: 5 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.98 }}
-                key={op.id}
-                className={`relative flex flex-col sm:flex-row sm:items-center justify-between gap-4 py-4 px-2 border-b border-white/5 transition-all duration-300 ${statusColor} ${op.archived ? "opacity-40" : ""}`}
+          // Compute identity progress
+          const totalActiveOps = identityOps.filter(o => !o.archived).length;
+          const completedOps = identityOps.filter(o => {
+            const log = getLogForOp(o.id);
+            return log?.status === "completed" || log?.status === "skipped";
+          }).length;
+          
+          let progressColor = "bg-white/20";
+          if (totalActiveOps > 0) {
+            if (completedOps === totalActiveOps) progressColor = "bg-emerald-400";
+            else if (completedOps > 0) progressColor = "bg-amber-400";
+          }
+
+          return (
+            <div key={identity} className="border border-white/5 bg-black/40 overflow-hidden">
+              <div 
+                className="flex items-center justify-between p-4 cursor-pointer hover:bg-white/[0.02] transition-colors"
+                onClick={() => {
+                  audioManager.playClick();
+                  setExpandedIdentities(prev => ({ ...prev, [identity]: !prev[identity] }));
+                }}
               >
-                {/* Active Indicator Line */}
-                {status === "active" && (
-                  <div className="absolute left-0 top-0 bottom-0 w-1 bg-amber-400 animate-pulse" />
-                )}
-                {status === "completed" && (
-                  <div className="absolute left-0 top-0 bottom-0 w-1 bg-emerald-500" />
-                )}
-
-                {/* Info */}
-                <div className="flex-1 pl-1">
-                  <div className="flex items-baseline gap-3">
-                    <h3 className="font-display text-sm uppercase tracking-wider text-white">
-                      {op.name}
-                    </h3>
-                    <span className="font-mono text-[9px] uppercase tracking-widest opacity-60">
-                      [{statusLabel}]
-                    </span>
-                  </div>
-                  {op.description && (
-                    <p className="font-mono text-[10px] text-white/40 mt-1 uppercase tracking-wide">
-                      {op.description}
-                    </p>
-                  )}
-                  {log?.skipReason && status === "skipped" && (
-                    <p className="font-mono text-[10px] text-red-400/80 mt-1 uppercase tracking-wide">
-                      REASON: {log.skipReason}
-                    </p>
-                  )}
-                  
-                  {/* Timestamps */}
-                  <div className="flex flex-wrap gap-4 mt-2 font-mono text-[9px] uppercase tracking-widest text-white/30">
-                    <span className={log?.startedAt ? "text-white/60" : ""}>
-                      START: {formatTime(log?.startedAt)}
-                    </span>
-                    <span className={log?.completedAt ? "text-white/60" : ""}>
-                      END: {formatTime(log?.completedAt)}
-                    </span>
-                    <span className={currentDuration > 0 ? (status === "active" ? "text-amber-400" : "text-white/60") : ""}>
-                      DUR: {formatDuration(currentDuration)}
-                    </span>
+                <div className="flex items-center gap-4">
+                  <h3 className="font-display text-lg uppercase tracking-wider text-white/90">
+                    {identity}
+                  </h3>
+                  <div className="flex gap-1">
+                    {Array.from({ length: totalActiveOps }).map((_, i) => (
+                      <div key={i} className={`w-1.5 h-1.5 rounded-full ${i < completedOps ? progressColor : "bg-white/10"}`} />
+                    ))}
                   </div>
                 </div>
+                <span className="font-mono text-[10px] text-white/30">{isExpanded ? "▲" : "▼"}</span>
+              </div>
 
-                {/* Action Controls */}
-                {!editMode ? (
-                  <div className="flex gap-2 shrink-0">
-                    {status === "pending" || status === "skipped" ? (
-                      <button
-                        onClick={() => handleSetStatus(op.id, "active")}
-                        className="font-mono text-[9px] uppercase px-3 py-1.5 text-amber-400 hover:text-amber-300 transition-colors"
-                      >
-                        [ Start ]
-                      </button>
-                    ) : status === "active" ? (
-                      <button
-                        onClick={() => handleSetStatus(op.id, "completed")}
-                        className="font-mono text-[9px] uppercase px-4 py-1.5 border border-emerald-500/30 text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 transition-colors tracking-widest"
-                      >
-                        Complete
-                      </button>
-                    ) : status === "completed" ? (
-                      <button
-                        onClick={() => handleSetStatus(op.id, "pending")}
-                        className="font-mono text-[9px] uppercase px-3 py-1.5 text-white/30 hover:text-white/80 transition-colors"
-                      >
-                        Reset
-                      </button>
-                    ) : null}
+              <AnimatePresence>
+                {isExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    className="border-t border-white/5"
+                  >
+                    <div className="flex flex-col">
+                      <AnimatePresence>
+                        {identityOps.map((op, idx) => {
+                          const log = getLogForOp(op.id);
+                          const status = log?.status || "pending";
+                          
+                          let currentDuration = log?.durationMs || 0;
+                          if (status === "active" && log?.lastResumedAt) {
+                            const elapsed = Math.max(0, nowMs - new Date(log.lastResumedAt).getTime());
+                            currentDuration += elapsed;
+                          }
 
-                    {(status === "pending" || status === "active") && (
-                      <button
-                        onClick={() => handleSetStatus(op.id, "skipped")}
-                        className="font-mono text-[9px] uppercase px-2 py-1.5 text-white/20 hover:text-red-400/80 transition-colors"
-                      >
-                        Skip
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  // Edit Controls
-                  <div className="flex items-center gap-2 shrink-0">
-                    <div className="flex flex-col gap-1 mr-2">
-                      <button onClick={() => handleMoveOrder(idx, -1)} className="text-white/30 hover:text-white text-[10px]">▲</button>
-                      <button onClick={() => handleMoveOrder(idx, 1)} className="text-white/30 hover:text-white text-[10px]">▼</button>
+                          let statusColor = "bg-transparent text-white/40";
+                          let statusLabel = "PENDING";
+                          
+                          if (status === "active") {
+                            statusColor = "bg-amber-400/5 text-amber-400";
+                            statusLabel = "ACTIVE";
+                          } else if (status === "completed") {
+                            statusColor = "bg-emerald-500/5 text-emerald-400";
+                            statusLabel = "COMPLETED";
+                          } else if (status === "skipped") {
+                            statusColor = "bg-red-500/5 text-red-500/60";
+                            statusLabel = "SKIPPED";
+                          }
+
+                          return (
+                            <motion.div
+                              layout
+                              initial={{ opacity: 0, y: 5 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0, scale: 0.98 }}
+                              key={op.id}
+                              className={`relative flex flex-col sm:flex-row sm:items-center justify-between gap-4 py-4 px-4 border-b border-white/5 last:border-b-0 transition-all duration-300 ${statusColor} ${op.archived ? "opacity-40" : ""}`}
+                            >
+                              {/* Active Indicator Line */}
+                              {status === "active" && (
+                                <div className="absolute left-0 top-0 bottom-0 w-1 bg-amber-400 animate-pulse" />
+                              )}
+                              {status === "completed" && (
+                                <div className="absolute left-0 top-0 bottom-0 w-1 bg-emerald-500" />
+                              )}
+
+                              {/* Info */}
+                              <div className="flex-1 pl-1">
+                                <div className="flex items-baseline gap-3">
+                                  <h3 className="font-display text-sm uppercase tracking-wider text-white">
+                                    {op.name}
+                                  </h3>
+                                  <span className="font-mono text-[9px] uppercase tracking-widest opacity-60">
+                                    [{statusLabel}]
+                                  </span>
+                                </div>
+                                {op.description && (
+                                  <p className="font-mono text-[10px] text-white/40 mt-1 uppercase tracking-wide">
+                                    {op.description}
+                                  </p>
+                                )}
+                                {log?.skipReason && status === "skipped" && (
+                                  <p className="font-mono text-[10px] text-red-400/80 mt-1 uppercase tracking-wide">
+                                    REASON: {log.skipReason}
+                                  </p>
+                                )}
+                                
+                                {/* Timestamps */}
+                                <div className="flex flex-wrap gap-4 mt-2 font-mono text-[9px] uppercase tracking-widest text-white/30">
+                                  <span className={log?.startedAt ? "text-white/60" : ""}>
+                                    START: {formatTime(log?.startedAt)}
+                                  </span>
+                                  <span className={log?.completedAt ? "text-white/60" : ""}>
+                                    END: {formatTime(log?.completedAt)}
+                                  </span>
+                                  <span className={currentDuration > 0 ? (status === "active" ? "text-amber-400" : "text-white/60") : ""}>
+                                    DUR: {formatDuration(currentDuration)}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Action Controls */}
+                              {!editMode ? (
+                                <div className="flex gap-2 shrink-0">
+                                  {status === "pending" || status === "skipped" ? (
+                                    <button
+                                      onClick={() => handleSetStatus(op.id, "active")}
+                                      className="font-mono text-[9px] uppercase px-3 py-1.5 text-amber-400 hover:text-amber-300 transition-colors"
+                                    >
+                                      [ Start ]
+                                    </button>
+                                  ) : status === "active" ? (
+                                    <button
+                                      onClick={() => handleSetStatus(op.id, "completed")}
+                                      className="font-mono text-[9px] uppercase px-4 py-1.5 border border-emerald-500/30 text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 transition-colors tracking-widest"
+                                    >
+                                      Complete
+                                    </button>
+                                  ) : status === "completed" ? (
+                                    <button
+                                      onClick={() => handleSetStatus(op.id, "pending")}
+                                      className="font-mono text-[9px] uppercase px-3 py-1.5 text-white/30 hover:text-white/80 transition-colors"
+                                    >
+                                      Reset
+                                    </button>
+                                  ) : null}
+
+                                  {(status === "pending" || status === "active") && (
+                                    <button
+                                      onClick={() => handleSetStatus(op.id, "skipped")}
+                                      className="font-mono text-[9px] uppercase px-2 py-1.5 text-white/20 hover:text-red-400/80 transition-colors"
+                                    >
+                                      Skip
+                                    </button>
+                                  )}
+                                </div>
+                              ) : (
+                                // Edit Controls
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <div className="flex flex-col gap-1 mr-2">
+                                    <button onClick={() => handleMoveOrder(operations.findIndex(o => o.id === op.id), -1)} className="text-white/30 hover:text-white text-[10px]">▲</button>
+                                    <button onClick={() => handleMoveOrder(operations.findIndex(o => o.id === op.id), 1)} className="text-white/30 hover:text-white text-[10px]">▼</button>
+                                  </div>
+                                  <button
+                                    onClick={() => handleToggleArchive(op.id, !op.archived)}
+                                    className={`font-mono text-[9px] uppercase px-2 py-1 border transition-colors ${
+                                      op.archived ? "border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10" : "border-red-500/30 text-red-400 hover:bg-red-500/10"
+                                    }`}
+                                  >
+                                    {op.archived ? "Restore" : "Archive"}
+                                  </button>
+                                </div>
+                              )}
+                            </motion.div>
+                          );
+                        })}
+                      </AnimatePresence>
+                      {identityOps.length === 0 && editMode && (
+                        <div className="p-4 text-center font-mono text-[10px] text-white/40 uppercase">
+                          No operations for {identity}.
+                        </div>
+                      )}
                     </div>
-                    <button
-                      onClick={() => handleToggleArchive(op.id, !op.archived)}
-                      className={`font-mono text-[9px] uppercase px-2 py-1 border transition-colors ${
-                        op.archived ? "border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10" : "border-red-500/30 text-red-400 hover:bg-red-500/10"
-                      }`}
-                    >
-                      {op.archived ? "Restore" : "Archive"}
-                    </button>
-                  </div>
+                  </motion.div>
                 )}
-              </motion.div>
-            );
-          })}
-        </AnimatePresence>
-        {operations.length === 0 && !editMode && (
-          <div className="p-4 border border-white/10 bg-white/5 text-center font-mono text-[10px] text-white/40 uppercase">
-            No permanent operations defined. Enter config mode to create.
-          </div>
-        )}
+              </AnimatePresence>
+            </div>
+          );
+        })}
       </div>
 
       {/* Edit Mode Panel */}
@@ -315,12 +381,22 @@ export default function PermanentOperationsBoard({ todaysDate }: Props) {
               Create New Operation
             </h4>
             <form onSubmit={handleCreateOperation} className="flex flex-col sm:flex-row gap-2">
+              <select
+                value={newOpIdentity}
+                onChange={(e) => setNewOpIdentity(e.target.value as ProtocolIdentity)}
+                className="bg-black/50 border border-white/10 px-3 py-2 font-mono text-[10px] uppercase text-white outline-none focus:border-amber-400/50"
+              >
+                <option value="Builder">Builder</option>
+                <option value="Striker">Striker</option>
+                <option value="King">King</option>
+                <option value="Guardian">Guardian</option>
+              </select>
               <input
                 type="text"
                 placeholder="Operation Name"
                 value={newOpName}
                 onChange={(e) => setNewOpName(e.target.value)}
-                className="bg-black/50 border border-white/10 px-3 py-2 font-mono text-xs text-white outline-none focus:border-amber-400/50 w-full sm:w-1/3"
+                className="bg-black/50 border border-white/10 px-3 py-2 font-mono text-xs text-white outline-none focus:border-amber-400/50 w-full sm:w-1/4"
               />
               <input
                 type="text"

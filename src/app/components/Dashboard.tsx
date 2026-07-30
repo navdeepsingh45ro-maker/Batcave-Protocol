@@ -12,6 +12,7 @@ import DataVaultPanel from "./DataVaultPanel";
 import DailyTransmission from "./DailyTransmission";
 import DailyMission from "./DailyMission";
 import PermanentOperationsBoard from "./PermanentOperationsBoard";
+import FocusTimer from "./FocusTimer";
 import type { DailyStateLog } from "@/lib/state-detection";
 import { localStateDetectionRepository } from "@/lib/state-detection";
 import { recommendCountermeasure } from "@/lib/countermeasures";
@@ -462,14 +463,34 @@ export default function Dashboard() {
                       />
                     )}
                     
-                    {/* Mission Input */}
-                    <DailyMission todaysDate={activeDate} />
+                    {/* Neural Check-In (Mandatory) */}
+                    <StatePanel 
+                      todaysDate={activeDate}
+                      onStateCheckedIn={() => setRefreshKey(k => k + 1)}
+                    />
 
-                    {/* Intelligent Countermeasures (Hidden unless triggered) */}
-                    <CountermeasureDispatch todaysDate={activeDate} />
+                    {/* Block downstream execution until checked in */}
+                    {latestStateLog ? (
+                      <div className="space-y-6 animate-fade-in pt-4">
+                        {/* Mission Input */}
+                        <DailyMission todaysDate={activeDate} />
 
-                    {/* Permanent Operations */}
-                    <PermanentOperationsBoard todaysDate={activeDate} />
+                        {/* Intelligent Countermeasures (Hidden unless triggered) */}
+                        <CountermeasureDispatch todaysDate={activeDate} />
+
+                        {/* Permanent Operations */}
+                        <PermanentOperationsBoard todaysDate={activeDate} />
+
+                        {/* Execution Engine (Timer) */}
+                        <FocusTimer todaysDate={activeDate} />
+                      </div>
+                    ) : (
+                      <div className="border border-white/5 bg-black/40 p-8 text-center mt-8">
+                        <p className="font-mono text-[10px] uppercase tracking-widest text-white/30">
+                          Awaiting Neural Check-In...
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </motion.div>
               ) : activeMode === "intelligence" ? (

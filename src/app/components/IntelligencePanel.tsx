@@ -422,13 +422,24 @@ export default function IntelligencePanel({ todaysDate, refreshKey }: Intelligen
         <WeeklyReviewReport todaysDate={todaysDate} />
       </div>
 
-      {/* ════════════════════════════════════════════════════════════
-          ROW 0: TODAY'S MENTAL PROFILE (Problem #2) — FULL WIDTH
-      ════════════════════════════════════════════════════════════ */}
-      <motion.div
-        variants={itemVariants}
-        className="panel p-4 lg:col-span-12 bg-black/45 border-white/8"
-      >
+      {beliefs.length < 5 && countermeasureLogs.length < 2 ? (
+        <div className="col-span-1 lg:col-span-12 panel p-8 bg-black/45 border-white/8 text-center mt-4">
+          <p className="font-mono text-[10px] uppercase tracking-widest text-white/30">
+            Intelligence Gathering...
+          </p>
+          <p className="font-mono text-[9px] text-white/20 mt-2">
+            Insufficient data to generate proactive insights. Maintain daily execution.
+          </p>
+        </div>
+      ) : (
+        <>
+          {/* ════════════════════════════════════════════════════════════
+              ROW 0: TODAY'S MENTAL PROFILE (Problem #2) — FULL WIDTH
+          ════════════════════════════════════════════════════════════ */}
+          <motion.div
+            variants={itemVariants}
+            className="panel p-4 lg:col-span-12 bg-black/45 border-white/8"
+          >
         <div className="mb-3">
           <p className="font-mono text-[9px] uppercase tracking-[0.24em] text-signal/80">Live Snapshot</p>
           <h3 className="font-display text-sm uppercase text-frost">Today&apos;s Mental Profile</h3>
@@ -1027,6 +1038,8 @@ export default function IntelligencePanel({ todaysDate, refreshKey }: Intelligen
           </div>
         )}
       </motion.div>
+      </>
+      )}
     </motion.div>
   );
 }

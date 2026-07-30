@@ -1,15 +1,16 @@
-import type { PermanentOperation, OperationLog, OperationStatus } from "./types";
+import type { PermanentOperation, OperationLog, OperationStatus, ProtocolIdentity } from "./types";
 
 const OPS_KEY = "batcave.permanent_operations.defs";
 const LOGS_KEY = "batcave.permanent_operations.logs";
 
 const DEFAULT_OPERATIONS: Partial<PermanentOperation>[] = [
-  { name: "Builder Work", description: "Deep work session for primary projects" },
-  { name: "Football Training", description: "Technical and physical training" },
-  { name: "Meditation", description: "Mental reset and clarity" },
-  { name: "Workout", description: "Physical conditioning" },
-  { name: "Sleep Protection", description: "8 hours of protected rest" },
-  { name: "Digital Discipline", description: "No phone / social media distractions" },
+  { name: "Builder Work", description: "Deep work session for primary projects", identity: "Builder" },
+  { name: "Learning", description: "Skill acquisition and mastery", identity: "Builder" },
+  { name: "Football Training", description: "Technical and physical training", identity: "Striker" },
+  { name: "Workout", description: "Physical conditioning", identity: "Striker" },
+  { name: "Reading / Reflection", description: "Mental growth and journaling", identity: "King" },
+  { name: "Sleep Protection", description: "8 hours of protected rest", identity: "Guardian" },
+  { name: "Digital Discipline", description: "No phone / social media distractions", identity: "Guardian" },
 ];
 
 class PermanentOperationsRepository {
@@ -24,7 +25,9 @@ class PermanentOperationsRepository {
     try {
       const raw = localStorage.getItem(OPS_KEY);
       if (!raw) return this.seedDefaultOperations();
-      return JSON.parse(raw);
+      const parsed: PermanentOperation[] = JSON.parse(raw);
+      // Migrate missing identity fields to 'Builder' by default
+      return parsed.map((op) => ({ ...op, identity: op.identity || "Builder" }));
     } catch {
       return this.seedDefaultOperations();
     }
@@ -41,6 +44,7 @@ class PermanentOperationsRepository {
       id: `op_${Date.now()}_${idx}`,
       name: def.name!,
       description: def.description,
+      identity: def.identity as ProtocolIdentity,
       order: idx,
       archived: false,
       createdAt: now,
@@ -49,12 +53,13 @@ class PermanentOperationsRepository {
     return ops;
   }
 
-  createOperation(name: string, description?: string): PermanentOperation {
+  createOperation(name: string, description?: string, identity: ProtocolIdentity = "Builder"): PermanentOperation {
     const ops = this.listOperations();
     const newOp: PermanentOperation = {
       id: `op_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       name,
       description,
+      identity,
       order: ops.length,
       archived: false,
       createdAt: new Date().toISOString(),
