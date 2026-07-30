@@ -1,4 +1,3 @@
-export * from "./apiContracts";
 export * from "./calculations";
 export * from "./config";
 export * from "./localStorageRepository";

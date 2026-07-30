@@ -11,8 +11,6 @@ import type { CountermeasureRecommendation } from "@/lib/countermeasures";
 import { localCountermeasureRepository, detectThreat, detectNeed } from "@/lib/countermeasures";
 import { COUNTERMEASURES } from "@/lib/countermeasures/config";
 import { audioManager } from "@/lib/audioManager";
-import { getActiveMission, isMissionActive } from "@/lib/mission-mode/modeManager";
-import { listDayLogs } from "@/lib/mission-mode/repository";
 
 interface CommandCenterProps {
   todaysDate: string;
@@ -62,10 +60,6 @@ export default function CommandCenter({
     return () => clearInterval(id);
   }, []);
 
-  // 1. Mission Mode Info
-  const missionActive = useMemo(() => isMissionActive(), [refreshKey]);
-  const activeMission = useMemo(() => getActiveMission(), [refreshKey]);
-
   // 2. Dominant Threat and Need
   const dominantThreat = useMemo(() => {
     if (!latestStateLog || latestStateLog.selectedStates.length === 0) return null;
@@ -99,7 +93,7 @@ export default function CommandCenter({
     return "Standby";
   }, [activeCountermeasure, recommendation]);
 
-  // 4. Current Streak Calculation (Unified score >= 60)
+  // 4. Current Streak Calculation (Foundation score >= 60)
   const currentStreak = useMemo(() => {
     const getISTDateString = (date: Date) => {
       const offset = 5.5 * 60 * 60 * 1000;
@@ -107,12 +101,9 @@ export default function CommandCenter({
       return ist.toISOString().slice(0, 10);
     };
     
-    const missionLogs = listDayLogs();
     const foundationActivities = localFoundationRepository.listFoundationActivities();
     
     const getScoreForDate = (dateStr: string) => {
-      const mLog = missionLogs.find(l => l.date === dateStr);
-      if (mLog) return mLog.score;
       const fScore = calculateDailyFoundationScoreFromActivities(foundationActivities, dateStr as any);
       return fScore.scorePercent;
     };
@@ -206,15 +197,13 @@ export default function CommandCenter({
   // Unified Status Check
   const statusLabel = useMemo(() => {
     if (dominantThreat) return "THREAT DETECTED";
-    if (missionActive) return "MISSION ACTIVE";
     return "ALL SYSTEMS STABLE";
-  }, [dominantThreat, missionActive]);
+  }, [dominantThreat]);
 
   const statusColor = useMemo(() => {
     if (dominantThreat) return "text-signal glow-text-red border-signal/30 bg-signal/5";
-    if (missionActive) return "text-amber-400 glow-text-amber border-amber-400/30 bg-amber-400/[0.02]";
     return "text-emerald-400 glow-text-emerald border-emerald-400/30 bg-emerald-500/[0.01]";
-  }, [dominantThreat, missionActive]);
+  }, [dominantThreat]);
 
   let sectionIdx = 0;
 
@@ -260,33 +249,7 @@ export default function CommandCenter({
           </p>
         </motion.div>
 
-        {/* 2. Objective & Mission Info */}
-        <motion.div
-          className="border border-white/6 bg-black/35 p-3 space-y-2 font-mono text-xs"
-          variants={sectionVariants}
-          initial="hidden"
-          animate="visible"
-          custom={sectionIdx++}
-        >
-          <div>
-            <span className="block text-[8px] uppercase tracking-wider text-white/30">
-              Current Mission
-            </span>
-            <p className="font-display text-[11px] uppercase text-white truncate">
-              {missionActive && activeMission ? activeMission.name : "None"}
-            </p>
-          </div>
-          <div className="border-t border-white/5 pt-1.5">
-            <span className="block text-[8px] uppercase tracking-wider text-white/30">
-              Current Objective
-            </span>
-            <p className="font-display text-[11px] uppercase text-frost truncate">
-              {missionActive && activeMission ? (activeMission.customObjective ?? activeMission.objective) : "Standing By"}
-            </p>
-          </div>
-        </motion.div>
-
-        {/* 3. Threats & Countermeasures */}
+        {/* 2. Threats & Countermeasures */}
         <motion.div
           className="grid grid-cols-2 gap-2 border border-white/6 bg-black/35 p-3 font-mono text-xs"
           variants={sectionVariants}

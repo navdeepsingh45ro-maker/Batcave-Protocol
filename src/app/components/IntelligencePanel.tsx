@@ -21,6 +21,7 @@ import {
 import { localCountermeasureRepository, calculateCountermeasureEffectiveness } from "@/lib/countermeasures";
 import { getStateCategory } from "@/lib/belief-intelligence/config";
 import { THREATS, COUNTERMEASURES } from "@/lib/countermeasures/config";
+import WeeklyReviewReport from "./WeeklyReviewReport";
 
 interface IntelligencePanelProps {
   todaysDate: ISODate;
@@ -417,6 +418,10 @@ export default function IntelligencePanel({ todaysDate, refreshKey }: Intelligen
       animate="visible"
       className="grid grid-cols-1 lg:grid-cols-12 gap-3 p-1 flex-1 min-h-0 overflow-y-auto"
     >
+      <div className="col-span-1 lg:col-span-12">
+        <WeeklyReviewReport todaysDate={todaysDate} />
+      </div>
+
       {/* ════════════════════════════════════════════════════════════
           ROW 0: TODAY'S MENTAL PROFILE (Problem #2) — FULL WIDTH
       ════════════════════════════════════════════════════════════ */}

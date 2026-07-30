@@ -106,36 +106,28 @@ export default function DailyTransmission({ todaysDate, dominantState }: DailyTr
   const categoryInfo = CATEGORY_LABELS[quote.category];
 
   return (
-    <div className="panel p-0 overflow-hidden transition-all duration-500">
+    <div className="w-full mb-2">
       {/* ── Main Transmission ─────────────────────────────────── */}
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.8, ease: "easeOut" }}
-        className="relative"
+        className="px-2"
       >
-        {/* Subtle top accent line */}
-        <div className="h-[1px] w-full bg-gradient-to-r from-transparent via-signal/40 to-transparent" />
-
-        <div className="px-5 pt-4 pb-4 space-y-4">
+        <div className="flex flex-col space-y-2">
           {/* Header */}
           <div className="flex items-center justify-between">
-            <div>
-              <p className="font-mono text-[10px] uppercase tracking-[0.3em] text-signal/70">
-                Bat Signal
-              </p>
-              <h2 className="font-display text-lg uppercase text-frost tracking-wide">
-                Daily Transmission
-              </h2>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className={`px-2 py-0.5 font-mono text-[8px] uppercase tracking-wider border ${categoryInfo.color}`}>
+            <p className="font-mono text-[9px] uppercase tracking-[0.3em] text-white/30">
+              Daily Transmission
+            </p>
+            <div className="flex items-center gap-3">
+              <span className={`font-mono text-[8px] uppercase tracking-wider ${categoryInfo.color.replace('border-', 'text-').replace('bg-', '')}`}>
                 {categoryInfo.label}
               </span>
               <button
                 type="button"
                 onClick={handleToggleArsenal}
-                className="font-mono text-[8px] uppercase tracking-wider text-white/25 hover:text-signal/60 transition-colors border border-white/8 px-2 py-0.5 hover:border-signal/20"
+                className="font-mono text-[8px] uppercase tracking-wider text-white/25 hover:text-signal/60 transition-colors"
               >
                 Arsenal {arsenalQuotes.length > 0 || showArsenal ? `(${localTransmissionRepository.getArsenal().length})` : ""}
               </button>
@@ -147,20 +139,32 @@ export default function DailyTransmission({ todaysDate, dominantState }: DailyTr
             {isRevealed && (
               <motion.div
                 key={quote.id}
-                initial={{ opacity: 0, y: 10 }}
+                initial={{ opacity: 0, y: 5 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.6, delay: 0.1 }}
-                className="space-y-3"
+                className="space-y-2"
               >
                 {/* The quote itself */}
-                <div className="border-l-2 border-signal/30 pl-4 py-1">
-                  <p className="font-display text-base sm:text-lg text-white/90 leading-relaxed italic">
+                <div>
+                  <p className="font-display text-sm sm:text-base text-white/50 leading-relaxed italic">
                     &ldquo;{quote.text}&rdquo;
                   </p>
-                  <p className="mt-2 font-mono text-[10px] text-white/40 uppercase tracking-wider">
-                    — {quote.source.name}
-                    <span className="text-white/20 ml-1">· {quote.source.origin}</span>
-                  </p>
+                  <div className="mt-1 flex items-center justify-between">
+                    <p className="font-mono text-[9px] text-white/30 uppercase tracking-wider">
+                      — {quote.source.name} <span className="text-white/20 ml-1">· {quote.source.origin}</span>
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleToggleSave}
+                      className={`font-mono text-[8px] uppercase tracking-wider transition-all duration-200 ${
+                        isSaved
+                          ? "text-signal"
+                          : "text-white/20 hover:text-signal/50"
+                      }`}
+                    >
+                      {isSaved ? "✓ Saved" : "Save"}
+                    </button>
+                  </div>
                 </div>
 
                 {/* Mission Interpretation */}
@@ -168,37 +172,15 @@ export default function DailyTransmission({ todaysDate, dominantState }: DailyTr
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: 0.4, duration: 0.5 }}
-                  className="border border-white/6 bg-white/[0.015] px-4 py-2.5"
                 >
-                  <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-signal/50 mb-1">
-                    Mission Interpretation
-                  </p>
-                  <p className="font-mono text-xs text-white/55 leading-relaxed">
-                    {quote.meaning}
+                  <p className="font-mono text-[9px] text-white/30 leading-relaxed">
+                    <span className="text-white/20 mr-1">Interpretation:</span>{quote.meaning}
                   </p>
                 </motion.div>
-
-                {/* Save button */}
-                <div className="flex items-center justify-end">
-                  <button
-                    type="button"
-                    onClick={handleToggleSave}
-                    className={`font-mono text-[9px] uppercase tracking-wider transition-all duration-200 px-2.5 py-1 border ${
-                      isSaved
-                        ? "border-signal/40 bg-signal/10 text-signal"
-                        : "border-white/10 text-white/25 hover:border-signal/20 hover:text-signal/50"
-                    }`}
-                  >
-                    {isSaved ? "✓ Saved to Arsenal" : "Save to Arsenal"}
-                  </button>
-                </div>
               </motion.div>
             )}
           </AnimatePresence>
         </div>
-
-        {/* Bottom accent */}
-        <div className="h-[1px] w-full bg-gradient-to-r from-transparent via-white/5 to-transparent" />
       </motion.div>
 
       {/* ── Quote Arsenal (expandable) ────────────────────────── */}

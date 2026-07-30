@@ -5,11 +5,13 @@ import { motion, AnimatePresence } from "framer-motion";
 import BootSequence from "./BootSequence";
 import StatePanel from "./StatePanel";
 import DecisionMetricsPanel from "./DecisionMetricsPanel";
-import CountermeasurePanel from "./CountermeasurePanel";
+import CountermeasureDispatch from "./CountermeasureDispatch";
 import CommandCenter from "./CommandCenter";
 import IntelligencePanel from "./IntelligencePanel";
 import DataVaultPanel from "./DataVaultPanel";
 import DailyTransmission from "./DailyTransmission";
+import DailyMission from "./DailyMission";
+import PermanentOperationsBoard from "./PermanentOperationsBoard";
 import type { DailyStateLog } from "@/lib/state-detection";
 import { localStateDetectionRepository } from "@/lib/state-detection";
 import { recommendCountermeasure } from "@/lib/countermeasures";
@@ -18,38 +20,6 @@ import type { CountermeasureRecommendation } from "@/lib/countermeasures";
 import type { ISODate, FoundationType } from "@/lib/foundation";
 import { localFoundationRepository } from "@/lib/foundation";
 import { audioManager } from "@/lib/audioManager";
-
-// ── Mission Mode Imports ────────────────────────────────────────
-import MissionDashboardHeader from "./mission/MissionDashboardHeader";
-import DailyOperationsCard from "./mission/DailyOperationsCard";
-import MissionScorePanel from "./mission/MissionScorePanel";
-import MomentumPanel from "./mission/MomentumPanel";
-import ShutdownModal from "./mission/ShutdownModal";
-import MissionHistoryPanel from "./mission/MissionHistoryPanel";
-import ModeSelector from "./mission/ModeSelector";
-import MissionControlDrawer from "./mission/MissionControlDrawer";
-import {
-  isMissionActive,
-  getActiveMission,
-  isMissionExpired,
-  deactivateMission,
-} from "@/lib/mission-mode/modeManager";
-import {
-  calculateMissionDayScore,
-  getScoreBreakdown,
-  getCardState,
-  buildMissionDayLog,
-} from "@/lib/mission-mode/scoreEngine";
-import { checkMomentumFlags, calculateMissionStability } from "@/lib/mission-mode/momentumEngine";
-import { getMissionRating } from "@/lib/mission-mode/config";
-import {
-  getDayLogsForMission,
-  upsertDayLog,
-  getDayLog,
-  getShutdownDismissedDate,
-  setShutdownDismissedDate,
-} from "@/lib/mission-mode/repository";
-import type { MissionConfig, ShutdownReflection, MissionDayLog } from "@/lib/mission-mode/types";
 
 /** Returns today's date in IST as YYYY-MM-DD */
 function getTodaysDate(): ISODate {
@@ -74,12 +44,18 @@ function formatDateLabel(dateStr: ISODate, offset: number): string {
   return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
-/** Check if it's past 8 PM IST */
-function isPastShutdownTime(): boolean {
-  const now = new Date();
-  const offset = 5.5 * 60 * 60 * 1000;
-  const ist = new Date(now.getTime() + offset);
-  return ist.getUTCHours() >= 14; // 8 PM IST = 14:30 UTC
+// ── Local DayLog type (replaces mission-mode types) ─────────────
+type CardStatus = "pending" | "in-progress" | "completed";
+
+interface DayLog {
+  date: string;
+  manualStatuses: Record<string, CardStatus>;
+  builderGoal: string;
+  athleteLocation: "Home" | "Park";
+  athleteDrills: { id: string; name: string; completed: boolean }[];
+  anchorTasks: { id: string; name: string; completed: boolean }[];
+  cardStates: { cardId: string; status: CardStatus; score: number; maxScore: number }[];
+  [key: string]: unknown;
 }
 
 const panelVariants = {
@@ -127,47 +103,6 @@ export default function Dashboard() {
     setRefreshKey((k) => k + 1);
   }, []);
 
-  // ── Mission Mode State ────────────────────────────────────────
-  const [missionModeKey, setMissionModeKey] = useState(0);
-  const [showShutdownModal, setShowShutdownModal] = useState(false);
-  const [drawerOpen, setDrawerOpen] = useState(false);
-
-  const missionActive = useMemo(() => isMissionActive(), [missionModeKey, refreshKey]);
-  const activeMission = useMemo(() => getActiveMission(), [missionModeKey, refreshKey]);
-
-  // Current daily log
-  const currentDayLog = useMemo(() => {
-    if (!activeMission) return null;
-    return getDayLog(activeMission.id, activeDate);
-  }, [activeMission, activeDate, refreshKey]);
-
-  // Mission-specific computed data
-  const missionScore = useMemo(() => {
-    if (!activeMission) return 0;
-    return calculateMissionDayScore(activeMission, activeDate);
-  }, [activeMission, activeDate, refreshKey]);
-
-  const missionRating = useMemo(() => {
-    if (!activeMission) return "—";
-    return getMissionRating(missionScore, activeMission.ratings).label;
-  }, [activeMission, missionScore]);
-
-  const missionBreakdown = useMemo(() => {
-    if (!activeMission) return [];
-    return getScoreBreakdown(activeMission, activeDate);
-  }, [activeMission, activeDate, refreshKey]);
-
-  const momentumFlags = useMemo(() => {
-    if (!activeMission) return null;
-    return checkMomentumFlags(activeMission, activeDate);
-  }, [activeMission, activeDate, refreshKey]);
-
-  const missionStability = useMemo(() => {
-    if (!activeMission) return null;
-    const dayLogs = getDayLogsForMission(activeMission.id);
-    return calculateMissionStability(activeMission, dayLogs);
-  }, [activeMission, refreshKey]);
-
   // Unified Foundation Resources loaded at parent
   const activities = useMemo(() => {
     return localFoundationRepository.listActivities();
@@ -188,33 +123,11 @@ export default function Dashboard() {
     return "PENDING" as const;
   }, [refreshKey, activeDate]);
 
-  // Update daily log fields
+  // Normal mode day log persistence
   const handleUpdateDayLog = useCallback(
-    (updates: Partial<MissionDayLog>) => {
-      if (!activeMission) {
-        // Normal Mode Mock Persistence of manual status & goals
-        const existingMockLogs = typeof window !== "undefined" ? JSON.parse(window.localStorage.getItem("batcave.normal.dayLogs") || "[]") : [];
-        const existing = existingMockLogs.find((l: any) => l.date === activeDate) || { date: activeDate, manualStatuses: {}, builderGoal: "", athleteLocation: "Home" };
-        const merged = {
-          ...existing,
-          ...updates,
-          manualStatuses: {
-            ...(existing.manualStatuses ?? {}),
-            ...(updates.manualStatuses ?? {}),
-          },
-          updatedAt: new Date().toISOString(),
-        };
-        const nextMockLogs = [
-          ...existingMockLogs.filter((l: any) => l.date !== activeDate),
-          merged,
-        ];
-        if (typeof window !== "undefined") {
-          window.localStorage.setItem("batcave.normal.dayLogs", JSON.stringify(nextMockLogs));
-        }
-        setRefreshKey((k) => k + 1);
-        return;
-      }
-      const existing = getDayLog(activeMission.id, activeDate) || buildMissionDayLog(activeMission, activeDate);
+    (updates: Partial<DayLog>) => {
+      const existingMockLogs = typeof window !== "undefined" ? JSON.parse(window.localStorage.getItem("batcave.normal.dayLogs") || "[]") : [];
+      const existing = existingMockLogs.find((l: any) => l.date === activeDate) || { date: activeDate, manualStatuses: {}, builderGoal: "", athleteLocation: "Home" };
       const merged = {
         ...existing,
         ...updates,
@@ -224,15 +137,20 @@ export default function Dashboard() {
         },
         updatedAt: new Date().toISOString(),
       };
-      upsertDayLog(merged);
+      const nextMockLogs = [
+        ...existingMockLogs.filter((l: any) => l.date !== activeDate),
+        merged,
+      ];
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("batcave.normal.dayLogs", JSON.stringify(nextMockLogs));
+      }
       setRefreshKey((k) => k + 1);
     },
-    [activeMission, activeDate]
+    [activeDate]
   );
 
-  // Normal Mode mock resolver
-  const mockNormalDayLog = useMemo(() => {
-    if (activeMission) return null;
+  // Normal Mode day log resolver
+  const activeDayLog = useMemo(() => {
     const existingMockLogs = typeof window !== "undefined" ? JSON.parse(window.localStorage.getItem("batcave.normal.dayLogs") || "[]") : [];
     return existingMockLogs.find((l: any) => l.date === activeDate) || {
       date: activeDate,
@@ -241,47 +159,9 @@ export default function Dashboard() {
       athleteLocation: "Home",
       athleteDrills: [],
       anchorTasks: [],
+      cardStates: [],
     };
-  }, [activeMission, activeDate, refreshKey]);
-
-  const activeDayLog = useMemo(() => {
-    return activeMission ? currentDayLog : mockNormalDayLog;
-  }, [activeMission, currentDayLog, mockNormalDayLog]);
-
-  // Auto-save mission day log when data changes
-  useEffect(() => {
-    if (!activeMission || !booted) return;
-    const existing = getDayLog(activeMission.id, activeDate);
-    const dayLog = buildMissionDayLog(activeMission, activeDate, existing);
-    if (momentumFlags) {
-      dayLog.momentumFlags = momentumFlags;
-    }
-    upsertDayLog(dayLog);
-  }, [activeMission, activeDate, missionScore, momentumFlags, booted]);
-
-  // Auto-expire mission
-  useEffect(() => {
-    if (activeMission && isMissionExpired(activeMission, todaysDate)) {
-      deactivateMission("Auto-completed: mission duration ended.", "completed");
-      setMissionModeKey((k) => k + 1);
-    }
-  }, [activeMission, todaysDate]);
-
-  // Auto-open shutdown modal after 8 PM IST
-  useEffect(() => {
-    if (!activeMission || !booted) return;
-    const dismissed = getShutdownDismissedDate();
-    const existing = getDayLog(activeMission.id, todaysDate);
-
-    if (
-      isPastShutdownTime() &&
-      dismissed !== todaysDate &&
-      !existing?.shutdownReflection &&
-      offsetDays === 0
-    ) {
-      setShowShutdownModal(true);
-    }
-  }, [activeMission, booted, todaysDate, offsetDays]);
+  }, [activeDate, refreshKey]);
 
   // Initialize audio state from local storage on mount
   useEffect(() => {
@@ -356,40 +236,6 @@ export default function Dashboard() {
     setOffsetDays(offset);
   }, []);
 
-  const handleModeChange = useCallback(() => {
-    setMissionModeKey((k) => k + 1);
-    setRefreshKey((k) => k + 1);
-  }, []);
-
-  const handleShutdownSubmit = useCallback(
-    (reflection: ShutdownReflection) => {
-      if (!activeMission) return;
-      const dayLog = buildMissionDayLog(activeMission, todaysDate);
-      dayLog.shutdownReflection = reflection;
-      if (momentumFlags) {
-        dayLog.momentumFlags = momentumFlags;
-      }
-      upsertDayLog(dayLog);
-      setShowShutdownModal(false);
-      setShutdownDismissedDate(todaysDate);
-    },
-    [activeMission, todaysDate, momentumFlags]
-  );
-
-  const handleShutdownClose = useCallback(() => {
-    setShowShutdownModal(false);
-    setShutdownDismissedDate(todaysDate);
-  }, [todaysDate]);
-
-  // Alive states:
-  const nothingNeedsAttention = useMemo(() => {
-    const manualStatuses = activeDayLog?.manualStatuses ?? {};
-    const anyInProgress = Object.values(manualStatuses).some((s) => s === "in-progress");
-    const isThreat = latestStateLog !== null && latestStateLog.riskScore >= 10;
-    const isNoPornFailed = constraintStatus === "FAILED";
-    return !anyInProgress && !isThreat && !isNoPornFailed;
-  }, [activeDayLog, latestStateLog, constraintStatus]);
-
   // Bottom action visibility:
   const [userExpandedIntelligence, setUserExpandedIntelligence] = useState(false);
 
@@ -414,14 +260,12 @@ export default function Dashboard() {
       </AnimatePresence>
 
       {booted && (
-        <main className="scanlines min-h-screen bg-obsidian p-3 text-frost sm:p-4">
-          <div className="mx-auto flex min-h-[calc(100vh-24px)] max-w-[1800px] flex-col gap-3">
+        <main className="scanlines min-h-screen bg-black p-4 text-frost sm:p-8">
+          <div className="mx-auto flex min-h-[calc(100vh-64px)] max-w-5xl flex-col gap-6">
 
-            {/* ─── NORMAL HEADER ─────────────────────────────────── */}
+            {/* ─── HEADER ─────────────────────────────────── */}
             <motion.header
-              className={`panel flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between bg-black/40 border-white/8 ${
-                missionActive ? "border-l-2 border-l-amber-400/40" : ""
-              }`}
+              className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-white/5 pb-4"
               variants={panelVariants}
               initial="hidden"
               animate="visible"
@@ -451,8 +295,8 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {/* Mode Toggle Tabs & Mode Selector & Mute Button */}
-              <div className="flex flex-wrap items-center gap-3">
+              {/* Mode Toggle Tabs & Mute Button */}
+              <div className="flex flex-wrap items-center gap-2">
                 <div className="flex items-center border border-white/10 bg-black/45 p-1 rounded-sm">
                   <button
                     type="button"
@@ -489,8 +333,6 @@ export default function Dashboard() {
                   </button>
                 </div>
 
-                <ModeSelector todaysDate={todaysDate} onOpenDrawer={() => setDrawerOpen(true)} />
-
                 <button
                   type="button"
                   onClick={handleToggleAudio}
@@ -504,16 +346,15 @@ export default function Dashboard() {
                 </button>
               </div>
 
-              <div className="grid grid-cols-3 gap-2 text-right font-mono text-[10px] uppercase text-white/40 sm:min-w-[390px]">
-                <div className="border border-white/8 bg-black/40 p-2">
-                  <p>Active Date</p>
-                  <p className={`mt-1 text-sm ${offsetDays > 0 ? "text-warning" : "text-white"}`}>
-                    {activeDate}
-                  </p>
+              <div className="flex flex-col sm:flex-row items-end sm:items-center gap-4 text-right font-mono text-[10px] uppercase text-white/40">
+                <div className="flex items-center gap-2">
+                  <span className="text-white/20">Date</span>
+                  <span className={`text-sm ${offsetDays > 0 ? "text-warning" : "text-white/80"}`}>{activeDate}</span>
                 </div>
-                <div className="border border-white/8 bg-black/40 p-2">
-                  <p>Risk</p>
-                  <p className={`mt-1 text-sm ${
+                <div className="hidden sm:block text-white/10">|</div>
+                <div className="flex items-center gap-2">
+                  <span className="text-white/20">Risk</span>
+                  <span className={`text-sm ${
                     latestStateLog
                       ? latestStateLog.riskLevel === "GREEN"
                         ? "text-emerald-400"
@@ -525,17 +366,15 @@ export default function Dashboard() {
                       : "text-white/30"
                   }`}>
                     {latestStateLog ? latestStateLog.riskLevel : "—"}
-                  </p>
+                  </span>
                 </div>
-                <div className="border border-white/8 bg-black/40 p-2">
-                  <p>Status</p>
-                  <p className="mt-1 flex items-center justify-end gap-1.5 text-sm text-emerald-400">
-                    <span className="relative flex h-1.5 w-1.5">
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
-                      <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                    </span>
-                    Online
-                  </p>
+                <div className="hidden sm:block text-white/10">|</div>
+                <div className="flex items-center gap-2">
+                  <span className="relative flex h-1.5 w-1.5">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
+                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                  </span>
+                  <span className="text-sm text-emerald-400">Online</span>
                 </div>
               </div>
             </motion.header>
@@ -549,7 +388,7 @@ export default function Dashboard() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -6 }}
                   transition={{ duration: 0.2 }}
-                  className="flex items-center gap-3 flex-wrap"
+                  className="flex items-center gap-2 flex-wrap"
                 >
                   <div className="flex items-center gap-1.5 border border-white/8 bg-black/35 p-1.5 rounded-sm">
                     <span className="font-mono text-[9px] uppercase tracking-widest text-white/25 px-1 hidden sm:inline">
@@ -612,217 +451,26 @@ export default function Dashboard() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -15 }}
                   transition={{ duration: 0.4 }}
-                  className="space-y-4"
+                  className="space-y-3"
                 >
                   {/* ───────────────── TOP ZONE ───────────────── */}
-                  <div className="grid gap-3 lg:grid-cols-3">
-                    <div className="lg:col-span-2 space-y-3">
-                      {missionActive && activeMission && (
-                        <MissionDashboardHeader
-                          config={activeMission}
-                          todaysDate={activeDate}
-                          score={missionScore}
-                          rating={missionRating}
-                        />
-                      )}
-                      
-                      {offsetDays === 0 && (
-                        <DailyTransmission
-                          todaysDate={todaysDate}
-                          dominantState={latestStateLog?.selectedStates?.[0] ?? null}
-                        />
-                      )}
-                    </div>
+                  <div className="space-y-6 w-full">
+                    {offsetDays === 0 && (
+                      <DailyTransmission
+                        todaysDate={todaysDate}
+                        dominantState={latestStateLog?.selectedStates?.[0] ?? null}
+                      />
+                    )}
                     
-                    <div className="lg:col-span-1">
-                      <CommandCenter
-                        todaysDate={activeDate}
-                        latestStateLog={latestStateLog}
-                        todaysStateLogCount={activeDateStateLogs.length}
-                        recommendation={recommendation}
-                        refreshKey={refreshKey}
-                      />
-                    </div>
+                    {/* Mission Input */}
+                    <DailyMission todaysDate={activeDate} />
+
+                    {/* Intelligent Countermeasures (Hidden unless triggered) */}
+                    <CountermeasureDispatch todaysDate={activeDate} />
+
+                    {/* Permanent Operations */}
+                    <PermanentOperationsBoard todaysDate={activeDate} />
                   </div>
-
-                  {/* ───────────────── CENTER ZONE ───────────────── */}
-                  {/* SYSTEM 1 — OPERATIONS */}
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-baseline border-b border-white/10 pb-1">
-                      <div className="flex items-center gap-2">
-                        <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-white/30">
-                          System 1 — Operations
-                        </p>
-                        <h2 className="font-display text-xl uppercase text-frost sm:text-2xl">
-                          Daily Operations
-                        </h2>
-                      </div>
-                      
-                      {nothingNeedsAttention && (
-                        <span className="flex items-center gap-1.5 font-mono text-[9px] uppercase text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 rounded-sm animate-pulse shadow-[0_0_10px_rgba(52,211,153,0.1)]">
-                          <span className="relative flex h-1.5 w-1.5">
-                            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
-                            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                          </span>
-                          All Systems Stable
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-                      <DailyOperationsCard
-                        cardId="builder"
-                        title="Builder"
-                        icon="🏗"
-                        todaysDate={activeDate}
-                        activeMission={activeMission}
-                        dayLog={activeDayLog}
-                        activities={activities}
-                        activityLogs={activityLogs}
-                        constraintStatus={constraintStatus}
-                        onUpdateDayLog={handleUpdateDayLog}
-                        onRefresh={handleFoundationLogged}
-                      />
-
-                      <DailyOperationsCard
-                        cardId="athlete"
-                        title="Athlete"
-                        icon="⚽"
-                        todaysDate={activeDate}
-                        activeMission={activeMission}
-                        dayLog={activeDayLog}
-                        activities={activities}
-                        activityLogs={activityLogs}
-                        constraintStatus={constraintStatus}
-                        onUpdateDayLog={handleUpdateDayLog}
-                        onRefresh={handleFoundationLogged}
-                      />
-
-                      <DailyOperationsCard
-                        cardId="reset"
-                        title="Reset"
-                        icon="🧠"
-                        todaysDate={activeDate}
-                        activeMission={activeMission}
-                        dayLog={activeDayLog}
-                        activities={activities}
-                        activityLogs={activityLogs}
-                        constraintStatus={constraintStatus}
-                        onUpdateDayLog={handleUpdateDayLog}
-                        onRefresh={handleFoundationLogged}
-                      />
-
-                      <DailyOperationsCard
-                        cardId="guardian"
-                        title="Guardian"
-                        icon="🛡"
-                        todaysDate={activeDate}
-                        activeMission={activeMission}
-                        dayLog={activeDayLog}
-                        activities={activities}
-                        activityLogs={activityLogs}
-                        constraintStatus={constraintStatus}
-                        onUpdateDayLog={handleUpdateDayLog}
-                        onRefresh={handleFoundationLogged}
-                      />
-                    </div>
-                  </div>
-
-                  {/* SYSTEM 2 — BELIEF INTELLIGENCE & DECISION METRICS (Always Visible) */}
-                  <div className="space-y-3 mt-4">
-                    <div className="flex items-center gap-2 border-b border-white/10 pb-1">
-                      <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-white/30">
-                        System 2 — Belief Intelligence
-                      </p>
-                      <h2 className="font-display text-xl uppercase text-frost sm:text-2xl">
-                        Cognitive Diagnostic
-                      </h2>
-                    </div>
-
-                    <div className="grid gap-3 grid-cols-1 lg:grid-cols-2">
-                      <StatePanel
-                        todaysDate={activeDate}
-                        onStateCheckedIn={handleStateCheckedIn}
-                      />
-                      <DecisionMetricsPanel
-                        todaysDate={activeDate}
-                        refreshKey={refreshKey}
-                      />
-                    </div>
-                  </div>
-
-                  {/* ───────────────── BOTTOM ZONE ───────────────── */}
-                  <div className="mt-6 border-t border-white/10 pt-4">
-                    <div 
-                      onClick={() => {
-                        audioManager.playClick();
-                        setUserExpandedIntelligence(!userExpandedIntelligence);
-                      }}
-                      className="flex justify-between items-center cursor-pointer select-none border border-white/8 bg-black/45 px-4 py-3 hover:bg-black/60 transition-all mb-4"
-                    >
-                      <div className="flex items-center gap-3">
-                        <span className="text-xl">🛡️</span>
-                        <div>
-                          <h3 className="font-display text-sm uppercase tracking-wider text-white">
-                            Action Dispatches & System Analytics
-                          </h3>
-                          <p className="font-mono text-[9px] text-white/30 uppercase tracking-widest mt-0.5">
-                            Countermeasure dispatches · Momentum flags · History charts
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 font-mono text-[10px] uppercase">
-                        <span className={showIntelligence ? "text-amber-400" : "text-white/40"}>
-                          {showIntelligence ? "ACTIVE" : "STANDBY"}
-                        </span>
-                        <span className="text-white/20">{showIntelligence ? "▲" : "▼"}</span>
-                      </div>
-                    </div>
-                    
-                    <AnimatePresence>
-                      {showIntelligence && (
-                        <motion.div
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: "auto", opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          className="grid gap-3 grid-cols-1 lg:grid-cols-2"
-                        >
-                          {/* Countermeasure dispatch */}
-                          <div className="flex min-h-0 flex-col">
-                            <CountermeasurePanel
-                              todaysDate={activeDate}
-                              latestStateLog={latestStateLog}
-                              onCountermeasureActioned={handleCountermeasureActioned}
-                            />
-                          </div>
-                          
-                          {/* Analytics (Momentum Panel / MissionScorePanel / Stability) */}
-                          <div className="space-y-3 flex min-h-0 flex-col justify-start">
-                            {momentumFlags && (
-                              <MomentumPanel
-                                flags={momentumFlags}
-                                stability={missionStability}
-                              />
-                            )}
-                            {missionActive && activeMission && (
-                              <MissionScorePanel
-                                config={activeMission}
-                                score={missionScore}
-                                rating={missionRating}
-                                breakdown={missionBreakdown}
-                              />
-                            )}
-                          </div>
-                          
-                          {/* History */}
-                          <div className="flex min-h-0 flex-col lg:col-span-2">
-                            <MissionHistoryPanel refreshKey={refreshKey} />
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-
                 </motion.div>
               ) : activeMode === "intelligence" ? (
                 <motion.div
@@ -852,41 +500,6 @@ export default function Dashboard() {
               )}
             </AnimatePresence>
           </div>
-
-          {/* ─── SHUTDOWN MODAL ─────────────────────────────────── */}
-          {missionActive && activeMission && (
-            <ShutdownModal
-              config={activeMission}
-              todaysDate={todaysDate}
-              isOpen={showShutdownModal}
-              onClose={handleShutdownClose}
-              onSubmit={handleShutdownSubmit}
-            />
-          )}
-
-          {/* ─── MISSION CONTROL DRAWER ─────────────────────────── */}
-          <MissionControlDrawer
-            todaysDate={todaysDate}
-            isOpen={drawerOpen}
-            onClose={() => setDrawerOpen(false)}
-            onRefresh={handleModeChange}
-            score={missionScore}
-            rating={missionRating}
-          />
-
-          {/* ─── FLOATING MISSION CONTROL BUTTON ────────────────── */}
-          {missionActive && (
-            <button
-              type="button"
-              onClick={() => {
-                audioManager.playClick();
-                setDrawerOpen(true);
-              }}
-              className="fixed bottom-6 right-6 z-40 flex items-center gap-2 border border-amber-400/40 bg-graphite/95 px-4 py-2.5 font-display text-[10px] uppercase tracking-wider text-amber-400 shadow-console hover:bg-amber-400/10 hover:border-amber-400/80 transition-all select-none animate-pulse"
-            >
-              ⚙ Mission Control
-            </button>
-          )}
         </main>
       )}
     </>
