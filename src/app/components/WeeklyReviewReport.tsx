@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { permanentOperationsRepository } from "@/lib/permanent-operations";
+import { identityOperationsRepository } from "@/lib/identity-operations";
 import type { ISODate } from "@/lib/foundation";
 import { audioManager } from "@/lib/audioManager";
 
@@ -32,7 +32,7 @@ export default function WeeklyReviewReport({ todaysDate }: Props) {
 
     // Get last 7 days
     const dates = Array.from({ length: 7 }, (_, i) => subtractDays(todaysDate, i));
-    const allOps = permanentOperationsRepository.listOperations();
+    const allOps = identityOperationsRepository.listOperations();
     
     let totalExpected = 0;
     let totalCompleted = 0;
@@ -42,7 +42,7 @@ export default function WeeklyReviewReport({ todaysDate }: Props) {
     const completedByDay: Record<string, number> = {};
 
     dates.forEach((date) => {
-      const logs = permanentOperationsRepository.listLogsForDate(date);
+      const logs = identityOperationsRepository.listLogsForDate(date);
       // Expected operations for this day = total operations that aren't archived (or were active that day)
       // For simplicity, we just use the current unarchived count * 7 as the baseline, 
       // or just sum the logs that exist if they cover all.

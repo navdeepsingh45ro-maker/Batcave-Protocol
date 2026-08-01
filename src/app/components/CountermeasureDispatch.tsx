@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { audioManager } from "@/lib/audioManager";
 import { localStateDetectionRepository, type ISODate } from "@/lib/state-detection";
-import { permanentOperationsRepository } from "@/lib/permanent-operations";
+import { identityOperationsRepository } from "@/lib/identity-operations";
 import { recommendCountermeasure, localCountermeasureRepository, type CountermeasureRecommendation } from "@/lib/countermeasures";
 
 interface Props {
@@ -20,7 +20,7 @@ export default function CountermeasureDispatch({ todaysDate }: Props) {
   const latestState = stateLogs.length > 0 ? stateLogs[stateLogs.length - 1] : null;
   const isNegative = latestState?.metadata?.stateCategory === "negative";
 
-  const opsLogs = permanentOperationsRepository.listLogsForDate(todaysDate);
+  const opsLogs = identityOperationsRepository.listLogsForDate(todaysDate);
   const skippedCount = opsLogs.filter(l => l.status === "skipped").length;
 
   const shouldActivate = isNegative || skippedCount >= 2;

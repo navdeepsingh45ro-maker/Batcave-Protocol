@@ -1,4 +1,4 @@
-import type { ProtocolIdentity } from "@/lib/permanent-operations";
+import type { ProtocolIdentity } from "@/lib/identity-operations";
 
 export type ObjectiveStatus = "Mission Complete" | "Significant Progress" | "Blocked";
 

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { permanentOperationsRepository, PermanentOperation, ProtocolIdentity } from "@/lib/permanent-operations";
+import { identityOperationsRepository, PermanentOperation, ProtocolIdentity, TodayMission } from "@/lib/identity-operations";
 import { audioManager } from "@/lib/audioManager";
 import type { ISODate } from "@/lib/foundation/types";
 import { focusSessionRepository, ObjectiveStatus, InterruptionReason } from "@/lib/focus-sessions";
@@ -15,6 +15,7 @@ type TimerState = "idle" | "task_selection" | "temp_task_input" | "active" | "br
 
 export default function FocusTimer({ todaysDate }: Props) {
   const [operations, setOperations] = useState<PermanentOperation[]>([]);
+  const [missions, setMissions] = useState<TodayMission[]>([]);
   const [state, setState] = useState<TimerState>("idle");
   
   // Timer state
@@ -23,6 +24,7 @@ export default function FocusTimer({ todaysDate }: Props) {
   
   // Session details
   const [linkedTaskId, setLinkedTaskId] = useState<string | null>(null);
+  const [linkedTaskType, setLinkedTaskType] = useState<"PermanentOperation" | "TodayMission" | null>(null);
   const [taskName, setTaskName] = useState<string>("Unassigned");
   const [activeIdentity, setActiveIdentity] = useState<ProtocolIdentity>("Builder");
   const [sessionStartTime, setSessionStartTime] = useState<string>("");
@@ -42,8 +44,11 @@ export default function FocusTimer({ todaysDate }: Props) {
   const [lastLoggedSummary, setLastLoggedSummary] = useState({ duration: 0, score: 0, status: "", identity: "" });
 
   useEffect(() => {
-    const ops = permanentOperationsRepository.listOperations().filter(o => !o.archived);
+    const ops = identityOperationsRepository.listOperations().filter(o => !o.archived);
     setOperations(ops);
+    const m = identityOperationsRepository.listTodayMissions(todaysDate).filter(m => m.status === "pending");
+    setMissions(m);
+
     const sessions = focusSessionRepository.listSessions().filter(s => s.date === todaysDate);
     setSessionNumber(sessions.length + 1);
   }, [state, todaysDate]);
@@ -85,6 +90,7 @@ export default function FocusTimer({ todaysDate }: Props) {
     setState("idle");
     setTimeLeft(initialTime);
     setLinkedTaskId(null);
+    setLinkedTaskType(null);
     setTaskName("Unassigned");
     setActiveIdentity("Builder");
   };
@@ -94,8 +100,9 @@ export default function FocusTimer({ todaysDate }: Props) {
     setState("task_selection");
   };
 
-  const startActiveSession = (id: string | null, name: string, identity: ProtocolIdentity) => {
+  const startActiveSession = (id: string | null, type: "PermanentOperation" | "TodayMission" | null, name: string, identity: ProtocolIdentity) => {
     setLinkedTaskId(id);
+    setLinkedTaskType(type);
     setTaskName(name || "Unassigned");
     setActiveIdentity(identity);
     setSessionStartTime(new Date().toISOString());
@@ -160,10 +167,12 @@ export default function FocusTimer({ todaysDate }: Props) {
       timerLength: initialTime,
     });
 
-    if (linkedTaskId) {
-      const log = permanentOperationsRepository.getOrCreateLog(linkedTaskId, todaysDate);
-      if (objectiveStatus === "Mission Complete") {
-        permanentOperationsRepository.updateLogStatus(log.id, "completed");
+    if (linkedTaskId && objectiveStatus === "Mission Complete") {
+      if (linkedTaskType === "PermanentOperation") {
+        const log = identityOperationsRepository.getOrCreateLog(linkedTaskId, todaysDate);
+        identityOperationsRepository.updateLogStatus(log.id, "completed", undefined, "Focus Timer");
+      } else if (linkedTaskType === "TodayMission") {
+        identityOperationsRepository.updateTodayMission(linkedTaskId, { status: "completed" }, todaysDate, "Focus Timer");
       }
     }
 
@@ -231,21 +240,32 @@ export default function FocusTimer({ todaysDate }: Props) {
             </p>
             
             <div className="space-y-4">
-              {operations.length > 0 && (
+              {(operations.length > 0 || missions.length > 0) && (
                 <div>
                   <label className="font-mono text-[9px] uppercase tracking-widest text-white/40 block mb-2">Select Existing Task</label>
                   <select
                     className="w-full bg-black/60 border border-white/10 px-3 py-2 font-mono text-[11px] uppercase text-white outline-none focus:border-emerald-500/50"
                     onChange={(e) => {
                       if (!e.target.value) return;
-                      const op = operations.find(o => o.id === e.target.value);
-                      if (op) startActiveSession(op.id, op.name, op.identity);
+                      const [type, id] = e.target.value.split(":");
+                      if (type === "op") {
+                        const op = operations.find(o => o.id === id);
+                        if (op) startActiveSession(op.id, "PermanentOperation", op.name, op.identity);
+                      } else {
+                        const m = missions.find(m => m.id === id);
+                        if (m) startActiveSession(m.id, "TodayMission", m.name, m.identity);
+                      }
                     }}
                     defaultValue=""
                   >
                     <option value="" disabled>-- Select Task --</option>
+                    {missions.length > 0 && <optgroup label="Today's Missions" className="bg-black text-white/50" />}
+                    {missions.map(m => (
+                      <option key={`m_${m.id}`} value={`mission:${m.id}`}>[{m.identity}] {m.name}</option>
+                    ))}
+                    {operations.length > 0 && <optgroup label="Permanent Operations" className="bg-black text-white/50 mt-2" />}
                     {operations.map(op => (
-                      <option key={op.id} value={op.id}>[{op.identity}] {op.name}</option>
+                      <option key={`op_${op.id}`} value={`op:${op.id}`}>[{op.identity}] {op.name}</option>
                     ))}
                   </select>
                 </div>
@@ -259,7 +279,7 @@ export default function FocusTimer({ todaysDate }: Props) {
                   Create Temporary Task
                 </button>
                 <button
-                  onClick={() => startActiveSession(null, "Unassigned", "Builder")}
+                  onClick={() => startActiveSession(null, null, "Unassigned", "Builder")}
                   className="flex-1 px-4 py-2 bg-white/5 border border-white/10 text-white/60 font-mono text-[10px] uppercase tracking-widest hover:bg-white/10 hover:text-white transition-all"
                 >
                   Continue Without Task
@@ -305,7 +325,7 @@ export default function FocusTimer({ todaysDate }: Props) {
               <button
                 onClick={() => {
                   if (tempTaskInput.trim()) {
-                    startActiveSession(null, tempTaskInput.trim(), activeIdentity);
+                    startActiveSession(null, null, tempTaskInput.trim(), activeIdentity);
                   }
                 }}
                 disabled={!tempTaskInput.trim()}
