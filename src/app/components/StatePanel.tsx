@@ -11,6 +11,7 @@ import type { BeliefState, StateCategory } from "@/lib/belief-intelligence/types
 import { STATE_SUGGESTIONS } from "@/lib/neural-intelligence/config";
 import { neuralIntelligenceEngine } from "@/lib/neural-intelligence/engine";
 import type { NeuralIntervention } from "@/lib/neural-intelligence/types";
+import { protocolEngine } from "@/lib/protocol-engine";
 
 interface StatePanelProps {
   todaysDate: ISODate;
@@ -111,8 +112,12 @@ export default function StatePanel({ todaysDate, onStateCheckedIn }: StatePanelP
     // Compute Response
     if (cat === "positive") {
       setMomentumMsg(neuralIntelligenceEngine.getMomentumResponse(selectedState));
+      // Dispatch momentum protocol optionally?
+      // Wait, let's let the engine handle it uniformly if we want.
+      // But the user specifically wanted momentum response to just show in the UI previously. Let's dispatch for negative.
     } else if (cat === "negative") {
-      setIntervention(neuralIntelligenceEngine.getIntervention(selectedState, cause, thought));
+      protocolEngine.triggerProtocol("NeuralIntelligence", selectedState, cause, thought);
+      setIntervention({ type: "Dispatched", primaryThreat: "", need: "", action: "" } as any); // Mock so step 5 shows something
     }
 
     onStateCheckedIn(stateLog);
@@ -325,24 +330,13 @@ export default function StatePanel({ todaysDate, onStateCheckedIn }: StatePanelP
                     <div className="text-center mb-6">
                       <h3 className="font-display text-2xl uppercase text-signal tracking-wider">Intervention Required</h3>
                       <p className="font-mono text-[10px] uppercase tracking-widest text-white/40 mt-1">
-                        {intervention.type === "DecisionMatrix" ? "Decision Matrix Match" : "Tactical Countermeasure"}
+                        State requires correction.
                       </p>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="border border-signal/20 bg-signal/5 p-4">
-                        <p className="font-mono text-[9px] uppercase tracking-wider text-signal/50 mb-1">Primary Threat</p>
-                        <p className="font-display text-sm text-signal/90">{intervention.primaryThreat}</p>
-                      </div>
-                      <div className="border border-warning/20 bg-warning/5 p-4">
-                        <p className="font-mono text-[9px] uppercase tracking-wider text-warning/50 mb-1">Target Need</p>
-                        <p className="font-display text-sm text-warning/90">{intervention.need}</p>
-                      </div>
-                    </div>
-
-                    <div className="border border-emerald-500/30 bg-emerald-500/10 p-6 text-center mt-4 shadow-[0_0_15px_rgba(16,185,129,0.1)]">
-                      <p className="font-mono text-[10px] uppercase tracking-widest text-emerald-400/70 mb-2">Recommended Action</p>
-                      <p className="font-display text-2xl text-emerald-400 uppercase">{intervention.action}</p>
+                    <div className="border border-signal/30 bg-signal/10 p-6 text-center mt-4 shadow-[0_0_15px_rgba(255,42,42,0.1)]">
+                      <p className="font-mono text-[10px] uppercase tracking-widest text-signal mb-2">Protocol Dispatched</p>
+                      <p className="font-display text-xl text-white/80 uppercase">Check Command Center</p>
                     </div>
                   </div>
                 )}

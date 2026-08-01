@@ -5,8 +5,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import BootSequence from "./BootSequence";
 import StatePanel from "./StatePanel";
 import DecisionMetricsPanel from "./DecisionMetricsPanel";
-import CountermeasureDispatch from "./CountermeasureDispatch";
 import CommandCenter from "./CommandCenter";
+import ProtocolDispatch from "./ProtocolDispatch";
 import IntelligencePanel from "./IntelligencePanel";
 import DataVaultPanel from "./DataVaultPanel";
 import DailyTransmission from "./DailyTransmission";
@@ -16,9 +16,6 @@ import AccountabilityEngine from "./AccountabilityEngine";
 import FocusTimer from "./FocusTimer";
 import type { DailyStateLog } from "@/lib/state-detection";
 import { localStateDetectionRepository } from "@/lib/state-detection";
-import { recommendCountermeasure } from "@/lib/countermeasures";
-import { localCountermeasureRepository } from "@/lib/countermeasures";
-import type { CountermeasureRecommendation } from "@/lib/countermeasures";
 import type { ISODate, FoundationType } from "@/lib/foundation";
 import { localFoundationRepository } from "@/lib/foundation";
 import { audioManager } from "@/lib/audioManager";
@@ -98,8 +95,7 @@ export default function Dashboard() {
   const [activeDateStateLogs, setActiveDateStateLogs] = useState<DailyStateLog[]>([]);
   const [latestStateLog, setLatestStateLog] = useState<DailyStateLog | null>(null);
 
-  // Countermeasure recommendation
-  const [recommendation, setRecommendation] = useState<CountermeasureRecommendation | null>(null);
+  // Countermeasure recommendation replaced by ProtocolEngine
 
   const handleFoundationLogged = useCallback(() => {
     setRefreshKey((k) => k + 1);
@@ -185,22 +181,6 @@ export default function Dashboard() {
     setActiveDateStateLogs(logs);
     const latest = logs.length > 0 ? logs[logs.length - 1] : null;
     setLatestStateLog(latest);
-
-    if (latest && latest.riskScore >= 10) {
-      const thoughtType = latest.metadata?.thoughtType ?? null;
-      if (thoughtType === "limiting") {
-        const cmLogs = localCountermeasureRepository.listLogs();
-        const rec = recommendCountermeasure(
-          { selectedStates: latest.selectedStates, date: activeDate },
-          cmLogs
-        );
-        setRecommendation(rec);
-      } else {
-        setRecommendation(null);
-      }
-    } else {
-      setRecommendation(null);
-    }
   }, [activeDate]);
 
   // Refresh on mount, refreshKey change, or activeDate change
@@ -476,8 +456,8 @@ export default function Dashboard() {
                         {/* Mission Input */}
                         <DailyMission todaysDate={activeDate} />
 
-                        {/* Intelligent Countermeasures (Hidden unless triggered) */}
-                        <CountermeasureDispatch todaysDate={activeDate} />
+                        {/* Intelligent Protocols (Hidden unless triggered) */}
+                        <ProtocolDispatch />
 
                         {/* Accountability Engine */}
                         <AccountabilityEngine todaysDate={activeDate} />
