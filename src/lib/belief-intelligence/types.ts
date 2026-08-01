@@ -6,24 +6,29 @@ export type StateCategory = "positive" | "neutral" | "negative";
 
 // ── V4.4: 15-state focused library ─────────────────────────────
 export type BeliefState =
-  // Positive (5)
+  // Positive (7)
   | "Focused"
   | "Motivated"
   | "Confident"
   | "Energized"
   | "Calm"
-  // Neutral (4)
+  | "Disciplined"
+  | "Flow State"
+  // Neutral (6)
   | "Reflective"
   | "Curious"
   | "Recovering"
   | "Uncertain"
-  // Negative (6)
+  | "Thinking"
+  | "Observing"
+  // Negative (7)
   | "Heavy"
   | "Lonely"
   | "Anxious"
   | "Overwhelmed"
   | "Frustrated"
   | "Fatigued"
+  | "Disconnected"
   // Deprecated aliases (kept for migration of old data)
   | "Determined"
   | "Restless"
@@ -37,7 +42,28 @@ export type PositiveCause =
   | "Productive Session"
   | "Strong Discipline"
   | "Physical Energy"
-  | "Clear Direction";
+  | "Clear Direction"
+  | "Clear Plan"
+  | "Good Sleep"
+  | "Fewer Interruptions"
+  | "Progress"
+  | "Inspiration"
+  | "Energy Peak"
+  | "Clarity"
+  | "Preparation"
+  | "Past Success"
+  | "Competence"
+  | "Readiness"
+  | "Meditation"
+  | "Rest"
+  | "Order"
+  | "No Urgent Threats"
+  | "Strong Commitment"
+  | "High Stakes"
+  | "System Alignment"
+  | "Deep Work"
+  | "Optimal Challenge"
+  | "Zero Distractions";
 
 export type NeutralCause =
   | "Reflection"
@@ -45,7 +71,20 @@ export type NeutralCause =
   | "Observation"
   | "Processing"
   | "Transition Period"
-  | "Exploration";
+  | "Exploration"
+  | "Post-Action"
+  | "Transition"
+  | "End of Day"
+  | "Intense Output"
+  | "Illness"
+  | "Poor Sleep"
+  | "Complex Problem"
+  | "Ambiguity"
+  | "Strategy Session"
+  | "New Information"
+  | "Novel Problem"
+  | "Waiting"
+  | "Passive State";
 
 export type NegativeCause =
   | "Missing Connection"
@@ -56,7 +95,25 @@ export type NegativeCause =
   | "Financial Stress"
   | "Social Pressure"
   | "Identity Conflict"
-  | "Uncertainty";
+  | "Uncertainty"
+  | "Burnout"
+  | "Poor Diet"
+  | "Sedentary"
+  | "Isolation"
+  | "Conflict"
+  | "Looming Deadline"
+  | "Too Many Tasks"
+  | "No Prioritization"
+  | "Context Switching"
+  | "Blocked Project"
+  | "Interruption"
+  | "Technical Issue"
+  | "Sleep Deprivation"
+  | "Long Hours"
+  | "Physical Exhaustion"
+  | "Lack of Purpose"
+  | "Boredom"
+  | "Misalignment";
 
 export type BeliefCause = PositiveCause | NeutralCause | NegativeCause | "Other";
 

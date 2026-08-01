@@ -10,11 +10,15 @@ export type EmotionalState =
   | "Confident"
   | "Energized"
   | "Calm"
+  | "Disciplined"
+  | "Flow State"
   // Neutral
   | "Reflective"
   | "Curious"
   | "Recovering"
   | "Uncertain"
+  | "Thinking"
+  | "Observing"
   // Negative
   | "Heavy"
   | "Lonely"
@@ -22,6 +26,7 @@ export type EmotionalState =
   | "Overwhelmed"
   | "Frustrated"
   | "Fatigued"
+  | "Disconnected"
   // Deprecated (migration compat)
   | "Determined"
   | "Restless"
