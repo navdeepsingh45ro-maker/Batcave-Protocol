@@ -7,8 +7,6 @@ import {
   IDENTITIES,
   FOUNDATION_IDENTITY_MAP,
   addDays,
-  calculateDailyFoundationScoreFromActivities,
-  getCompletedFoundationTypesFromActivities,
 } from "@/lib/foundation";
 import type { Identity, ISODate } from "@/lib/foundation";
 import { localFoundationRepository } from "@/lib/foundation";
@@ -22,6 +20,7 @@ import { localCountermeasureRepository, calculateCountermeasureEffectiveness } f
 import { getStateCategory } from "@/lib/belief-intelligence/config";
 import { THREATS, COUNTERMEASURES } from "@/lib/countermeasures/config";
 import WeeklyReviewReport from "./WeeklyReviewReport";
+import ExecutionIntelligenceEngine from "./ExecutionIntelligenceEngine";
 
 interface IntelligencePanelProps {
   todaysDate: ISODate;
@@ -111,61 +110,7 @@ export default function IntelligencePanel({ todaysDate, refreshKey }: Intelligen
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [refreshKey]);
 
-  // ── Foundation charts ──────────────────────────────────────────
-  const scores = useMemo(() =>
-    dates.map((d) => {
-      const score = calculateDailyFoundationScoreFromActivities(activities, d);
-      return { date: d, scorePercent: score.scorePercent, completedCount: score.completedCount };
-    }),
-    [dates, activities]);
 
-  const averageReadiness = useMemo(() => {
-    if (scores.length === 0) return 0;
-    return Math.round(scores.reduce((t, e) => t + e.scorePercent, 0) / scores.length);
-  }, [scores]);
-
-  const heatmapMatrix = useMemo(() =>
-    FOUNDATION_DEFINITIONS.map((def) => ({
-      type: def.type,
-      identity: def.identity,
-      days: dates.map((d) => ({
-        date: d,
-        completed: getCompletedFoundationTypesFromActivities(activities, d).includes(def.type),
-      })),
-    })),
-    [dates, activities]);
-
-  const identityScores = useMemo(() => {
-    const counts: Record<Identity, number> = { King: 0, Builder: 0, Striker: 0, Guardian: 0 };
-    dates.forEach((d) => {
-      const completed = getCompletedFoundationTypesFromActivities(activities, d);
-      new Set(completed.map((f) => FOUNDATION_IDENTITY_MAP[f])).forEach((id) => { if (id) counts[id]++; });
-    });
-    return IDENTITIES.map((id) => ({
-      identity: id,
-      activeDays: counts[id],
-      scorePercent: Math.round((counts[id] / 7) * 100),
-    }));
-  }, [dates, activities]);
-
-  // ── SVG line chart ────────────────────────────────────────────
-  const svgWidth = 600, svgHeight = 150, paddingX = 45, paddingY = 20;
-  const points = useMemo(() => {
-    const cw = svgWidth - paddingX * 2, ch = svgHeight - paddingY * 2;
-    return scores.map((s, i) => ({
-      x: paddingX + i * (cw / 6),
-      y: paddingY + ch - (s.scorePercent / 100) * ch,
-      scorePercent: s.scorePercent,
-    }));
-  }, [scores]);
-  const linePath = useMemo(() =>
-    points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" "),
-    [points]);
-  const fillPath = useMemo(() =>
-    points.length === 0
-      ? ""
-      : `${linePath} L ${points[points.length - 1].x} ${svgHeight - paddingY} L ${points[0].x} ${svgHeight - paddingY} Z`,
-    [points, linePath]);
 
   // ── TODAY'S MENTAL PROFILE (Problem #2) ────────────────────────
   const todayBeliefs = useMemo(() => beliefs.filter((b) => b.date === todaysDate), [beliefs, todaysDate]);
@@ -552,138 +497,11 @@ export default function IntelligencePanel({ todaysDate, refreshKey }: Intelligen
       )}
 
       {/* ════════════════════════════════════════════════════════════
-          ROW 1: READINESS CIRCLE & HEATMAP & IDENTITY
+          ROW 1: EXECUTION INTELLIGENCE ENGINE (New)
       ════════════════════════════════════════════════════════════ */}
-      <motion.div
-        variants={itemVariants}
-        className="panel p-4 lg:col-span-4 flex flex-col justify-between items-center text-center bg-black/45 border-white/8 min-h-[220px]"
-      >
-        <div className="w-full text-left">
-          <p className="font-mono text-[9px] uppercase tracking-[0.24em] text-signal/80">Analytics Alpha</p>
-          <h3 className="font-display text-sm uppercase text-frost">Readiness Index</h3>
-        </div>
-        <div className="relative my-3 flex items-center justify-center">
-          <svg className="h-24 w-24 transform -rotate-90">
-            <circle cx="48" cy="48" r="40" className="stroke-white/5 fill-transparent" strokeWidth="4" />
-            <motion.circle
-              cx="48" cy="48" r="40"
-              className="stroke-signal/85 fill-transparent"
-              strokeWidth="4"
-              strokeDasharray={2 * Math.PI * 40}
-              initial={{ strokeDashoffset: 2 * Math.PI * 40 }}
-              animate={{ strokeDashoffset: 2 * Math.PI * 40 - (2 * Math.PI * 40 * averageReadiness) / 100 }}
-              transition={{ duration: 1.2, ease: "easeOut" }}
-              strokeLinecap="round"
-            />
-          </svg>
-          <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <span className="font-display text-2xl text-frost">{averageReadiness}%</span>
-            <span className="font-mono text-[8px] text-white/25 uppercase tracking-wider">7-Day Avg</span>
-          </div>
-        </div>
-        <div className="flex gap-2 flex-wrap justify-center">
-          {scores.map((s) => (
-            <div key={s.date} className="text-center">
-              <span className={`block text-[9px] font-mono ${s.scorePercent >= 60 ? "text-emerald-400" : s.scorePercent >= 30 ? "text-warning" : "text-signal"}`}>
-                {s.completedCount}/5
-              </span>
-              <span className="block text-[8px] font-mono text-white/20">{formatDayOfWeek(s.date)}</span>
-            </div>
-          ))}
-        </div>
-      </motion.div>
-
-      {/* Heatmap */}
-      <motion.div
-        variants={itemVariants}
-        className="panel p-4 lg:col-span-4 bg-black/45 border-white/8"
-      >
-        <div>
-          <p className="font-mono text-[9px] uppercase tracking-[0.24em] text-signal/80">Foundation</p>
-          <h3 className="font-display text-sm uppercase text-frost mb-3">7-Day Heatmap</h3>
-        </div>
-        <div className="space-y-2">
-          {heatmapMatrix.map((row) => (
-            <div key={row.type} className="flex items-center gap-2">
-              <span className="w-20 shrink-0 font-mono text-[9px] text-white/40 uppercase truncate">{row.type}</span>
-              <div className="flex gap-1 flex-1">
-                {row.days.map((day) => (
-                  <div
-                    key={day.date}
-                    className={`flex-1 h-3.5 rounded-sm transition-all ${
-                      day.completed
-                        ? "bg-signal/70 shadow-[0_0_4px_rgba(255,42,42,0.15)]"
-                        : "bg-white/[0.03] border border-white/[0.04]"
-                    }`}
-                    title={`${row.type} — ${formatDateLabel(day.date)} — ${day.completed ? "Done" : "Missed"}`}
-                  />
-                ))}
-              </div>
-            </div>
-          ))}
-          <div className="flex gap-1 pt-1 pl-[88px]">
-            {dates.map((d) => (
-              <span key={d} className="flex-1 text-center font-mono text-[7px] text-white/15">{formatDayOfWeek(d)}</span>
-            ))}
-          </div>
-        </div>
-      </motion.div>
-
-      {/* Identity */}
-      <motion.div
-        variants={itemVariants}
-        className="panel p-4 lg:col-span-4 bg-black/45 border-white/8 flex flex-col justify-between"
-      >
-        <div>
-          <p className="font-mono text-[9px] uppercase tracking-[0.24em] text-signal/80">Persona Index</p>
-          <h3 className="font-display text-sm uppercase text-frost mb-4">Identity Participation</h3>
-        </div>
-        <div className="flex-1 flex flex-col justify-center space-y-2.5">
-          {identityScores.map((score) => (
-            <div key={score.identity} className="space-y-1">
-              <div className="flex items-center justify-between font-mono text-[10px]">
-                <span className="font-display uppercase text-white/60">{score.identity}</span>
-                <span className="text-white/40">{score.activeDays}/7 D ({score.scorePercent}%)</span>
-              </div>
-              <MiniBar percent={score.scorePercent} color="bg-signal/70" />
-            </div>
-          ))}
-        </div>
-      </motion.div>
-
-      {/* ════════════════════════════════════════════════════════════
-          ROW 2: FOUNDATION TREND LINE — FULL WIDTH
-      ════════════════════════════════════════════════════════════ */}
-      <motion.div
-        variants={itemVariants}
-        className="panel p-4 lg:col-span-12 bg-black/45 border-white/8 min-h-[200px]"
-      >
-        <div className="mb-2">
-          <p className="font-mono text-[9px] uppercase tracking-[0.24em] text-signal/80">Trend</p>
-          <h3 className="font-display text-sm uppercase text-frost">7-Day Foundation Readiness</h3>
-        </div>
-        <div className="w-full overflow-hidden">
-          <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="w-full h-auto">
-            {points.length > 0 && (
-              <>
-                <path d={fillPath} fill="rgba(255,42,42,0.05)" />
-                <path d={linePath} fill="none" stroke="rgba(255,42,42,0.6)" strokeWidth="2" strokeLinecap="round" />
-                {points.map((p, i) => (
-                  <g key={i}>
-                    <circle cx={p.x} cy={p.y} r="4" fill="rgba(255,42,42,0.9)" stroke="rgba(0,0,0,0.4)" strokeWidth="1.5" />
-                    <text x={p.x} y={p.y - 10} textAnchor="middle" className="text-[10px] font-mono fill-white/50">
-                      {p.scorePercent}%
-                    </text>
-                    <text x={p.x} y={svgHeight - 4} textAnchor="middle" className="text-[9px] font-mono fill-white/20">
-                      {formatDateLabel(scores[i].date)}
-                    </text>
-                  </g>
-                ))}
-              </>
-            )}
-          </svg>
-        </div>
-      </motion.div>
+      <div className="lg:col-span-12 my-2">
+        <ExecutionIntelligenceEngine todaysDate={todaysDate} />
+      </div>
 
       {/* ════════════════════════════════════════════════════════════
           ROW 3: DAILY PSYCHOLOGICAL TIMELINE (Problem #1) — FULL WIDTH
