@@ -11,7 +11,7 @@ export interface PermanentOperation {
   dailyGoal?: string; // Optional user-defined goal (e.g. "2 Focus Sessions")
 }
 
-export type OperationStatus = "pending" | "active" | "completed" | "skipped";
+export type OperationStatus = "pending" | "active" | "completed" | "skipped" | "missed";
 
 // Tracks daily progress for Permanent Operations (preserves backward compatibility)
 export interface OperationLog {
@@ -30,7 +30,7 @@ export interface TodayMission {
   id: string;
   name: string;
   identity: ProtocolIdentity;
-  status: "pending" | "completed";
+  status: "pending" | "completed" | "missed";
   createdAt: string;
   completedAt?: string;
 }

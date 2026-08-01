@@ -5,6 +5,7 @@ const OPS_KEY = "batcave.permanent_operations.defs";
 const LOGS_KEY = "batcave.permanent_operations.logs";
 const MISSIONS_KEY = "batcave.today_missions";
 const HISTORY_KEY = "batcave.task_history";
+const ACCOUNTABILITY_KEY = "batcave.accountability_review";
 
 const DEFAULT_OPERATIONS: Partial<PermanentOperation>[] = [
   { name: "Builder Work", description: "Deep work session for primary projects", identity: "Builder" },
@@ -38,7 +39,7 @@ class IdentityOperationsRepository {
       totalPoints += 10; // Each op is worth 10 points
       if (log?.status === "completed") {
         earnedPoints += 10;
-      } else if (log?.status === "skipped") {
+      } else if (log?.status === "skipped" || log?.status === "missed") {
         earnedPoints += 2; // Marginal credit for accountability
       }
     });
@@ -216,7 +217,7 @@ class IdentityOperationsRepository {
       newLastResumedAt = now;
     }
 
-    if (status === "completed" || status === "skipped") {
+    if (status === "completed" || status === "skipped" || status === "missed") {
       if (!newCompletedAt) newCompletedAt = now;
       
       // Also log to history
@@ -308,7 +309,7 @@ class IdentityOperationsRepository {
     const previousStatus = all[idx].status;
     all[idx] = { ...all[idx], ...updates };
 
-    if (previousStatus === "pending" && all[idx].status === "completed") {
+    if (previousStatus === "pending" && (all[idx].status === "completed" || all[idx].status === "missed")) {
       all[idx].completedAt = new Date().toISOString();
       this.addHistoryRecord({
         taskName: all[idx].name,
@@ -316,6 +317,7 @@ class IdentityOperationsRepository {
         date: date,
         completedAt: all[idx].completedAt,
         durationMs: 0,
+        skipReason: all[idx].status === "missed" ? (updates as any).skipReason : undefined,
         completionSource: source,
         taskType: "TodayMission"
       });
@@ -362,6 +364,78 @@ class IdentityOperationsRepository {
     });
 
     localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+  }
+
+  // --- Accountability Engine ---
+
+  hasCompletedAccountabilityReview(date: string): boolean {
+    if (!this.isClient) return true;
+    try {
+      const raw = localStorage.getItem(ACCOUNTABILITY_KEY);
+      if (!raw) return false;
+      const reviews: string[] = JSON.parse(raw);
+      return reviews.includes(date);
+    } catch {
+      return false;
+    }
+  }
+
+  markAccountabilityReviewCompleted(date: string) {
+    if (!this.isClient) return;
+    try {
+      let reviews: string[] = [];
+      const raw = localStorage.getItem(ACCOUNTABILITY_KEY);
+      if (raw) reviews = JSON.parse(raw);
+      if (!reviews.includes(date)) {
+        reviews.push(date);
+        localStorage.setItem(ACCOUNTABILITY_KEY, JSON.stringify(reviews));
+      }
+    } catch {}
+  }
+
+  getUnfinishedTasks(yesterday: string): Array<{ id: string; name: string; identity: ProtocolIdentity; type: "PermanentOperation" | "TodayMission" }> {
+    const unfinished: Array<{ id: string; name: string; identity: ProtocolIdentity; type: "PermanentOperation" | "TodayMission" }> = [];
+    
+    // Permanent Operations
+    const ops = this.listOperations().filter(o => !o.archived);
+    const logs = this.listLogsForDate(yesterday);
+    
+    ops.forEach(op => {
+      const log = logs.find(l => l.operationId === op.id);
+      if (!log || log.status === "pending" || log.status === "active") {
+        unfinished.push({
+          id: op.id,
+          name: op.name,
+          identity: op.identity,
+          type: "PermanentOperation"
+        });
+      }
+    });
+
+    // Today's Missions from yesterday
+    const missions = this.listTodayMissions(yesterday);
+    missions.forEach(m => {
+      if (m.status === "pending" && m.createdAt.startsWith(yesterday)) {
+        unfinished.push({
+          id: m.id,
+          name: m.name,
+          identity: m.identity,
+          type: "TodayMission"
+        });
+      }
+    });
+
+    return unfinished;
+  }
+
+  logUnfinishedTaskReason(taskId: string, type: "PermanentOperation" | "TodayMission", date: string, reason: string) {
+    if (type === "PermanentOperation") {
+      const log = this.getOrCreateLog(taskId, date);
+      this.updateLogStatus(log.id, "missed", reason, "Manual");
+    } else {
+      // For TodayMission we update its status and include the reason
+      this.updateTodayMission(taskId, { status: "missed", skipReason: reason } as any, date, "Manual");
+    }
   }
 }
 

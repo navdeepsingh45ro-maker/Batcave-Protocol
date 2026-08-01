@@ -12,6 +12,7 @@ import DataVaultPanel from "./DataVaultPanel";
 import DailyTransmission from "./DailyTransmission";
 import DailyMission from "./DailyMission";
 import IdentityOperationsBoard from "./IdentityOperationsBoard";
+import AccountabilityEngine from "./AccountabilityEngine";
 import FocusTimer from "./FocusTimer";
 import type { DailyStateLog } from "@/lib/state-detection";
 import { localStateDetectionRepository } from "@/lib/state-detection";
@@ -477,6 +478,9 @@ export default function Dashboard() {
 
                         {/* Intelligent Countermeasures (Hidden unless triggered) */}
                         <CountermeasureDispatch todaysDate={activeDate} />
+
+                        {/* Accountability Engine */}
+                        <AccountabilityEngine todaysDate={activeDate} />
 
                         {/* Identity Operations */}
                         <IdentityOperationsBoard todaysDate={activeDate} />
