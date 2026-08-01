@@ -43,14 +43,20 @@ export default function FocusTimer({ todaysDate }: Props) {
   // Logged summary details
   const [lastLoggedSummary, setLastLoggedSummary] = useState({ duration: 0, score: 0, status: "", identity: "" });
 
-  useEffect(() => {
-    const ops = identityOperationsRepository.listOperations().filter(o => !o.archived);
+  const loadData = () => {
+    const ops = identityOperationsRepository.listOperations().filter(o => !o.archived && o.focusTimerEligible !== false);
     setOperations(ops);
     const m = identityOperationsRepository.listTodayMissions(todaysDate).filter(m => m.status === "pending");
     setMissions(m);
 
     const sessions = focusSessionRepository.listSessions().filter(s => s.date === todaysDate);
     setSessionNumber(sessions.length + 1);
+  };
+
+  useEffect(() => {
+    loadData();
+    window.addEventListener("batcave-ops-updated", loadData);
+    return () => window.removeEventListener("batcave-ops-updated", loadData);
   }, [state, todaysDate]);
 
   // Request Notification Permission

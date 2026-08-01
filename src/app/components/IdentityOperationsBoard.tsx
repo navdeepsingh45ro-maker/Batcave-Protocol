@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { identityOperationsRepository, PermanentOperation, OperationLog, OperationStatus, ProtocolIdentity, TodayMission, TaskHistoryRecord } from "@/lib/identity-operations";
+import { identityOperationsRepository, PermanentOperation, OperationLog, OperationStatus, ProtocolIdentity, TodayMission, TaskHistoryRecord, Restriction, RestrictionLog, RestrictionSeverity } from "@/lib/identity-operations";
 import { audioManager } from "@/lib/audioManager";
 import type { ISODate } from "@/lib/foundation/types";
 
@@ -12,7 +12,9 @@ interface Props {
 
 export default function IdentityOperationsBoard({ todaysDate }: Props) {
   const [operations, setOperations] = useState<PermanentOperation[]>([]);
+  const [restrictions, setRestrictions] = useState<Restriction[]>([]);
   const [logs, setLogs] = useState<OperationLog[]>([]);
+  const [restrictionLogs, setRestrictionLogs] = useState<RestrictionLog[]>([]);
   const [missions, setMissions] = useState<TodayMission[]>([]);
   const [history, setHistory] = useState<TaskHistoryRecord[]>([]);
   
@@ -21,20 +23,37 @@ export default function IdentityOperationsBoard({ todaysDate }: Props) {
   const [skipReason, setSkipReason] = useState("");
   const [skipError, setSkipError] = useState(false);
   
+  // Violation Modal state (reuses skipReason)
+  const [violationResId, setViolationResId] = useState<string | null>(null);
+  
   // Edit mode states (unified quick add)
   const [activeAddIdentity, setActiveAddIdentity] = useState<ProtocolIdentity | null>(null);
-  const [addType, setAddType] = useState<"permanent" | "mission">("mission");
+  const [addType, setAddType] = useState<"operation" | "restriction">("operation");
   const [newTaskName, setNewTaskName] = useState("");
   const [newOpDesc, setNewOpDesc] = useState("");
-  const [newOpGoal, setNewOpGoal] = useState("");
+  
+  // Operation specifics
+  const [newOpIsOptional, setNewOpIsOptional] = useState(false);
+  const [newOpFocusEligible, setNewOpFocusEligible] = useState(true);
+  
+  // Restriction specifics
+  const [newResSeverity, setNewResSeverity] = useState<RestrictionSeverity>("Medium");
+  const [newResTrackDaily, setNewResTrackDaily] = useState(true);
+  const [newResAskReason, setNewResAskReason] = useState(false);
 
   const loadData = useCallback(() => {
     const allOps = identityOperationsRepository.listOperations().filter(o => !o.archived);
     allOps.sort((a, b) => a.order - b.order);
     setOperations(allOps);
 
+    const allRes = identityOperationsRepository.listRestrictions().filter(r => !r.archived);
+    setRestrictions(allRes);
+
     const dateLogs = identityOperationsRepository.listLogsForDate(todaysDate);
     setLogs(dateLogs);
+
+    const resLogs = identityOperationsRepository.listRestrictionLogsForDate(todaysDate);
+    setRestrictionLogs(resLogs);
 
     const todaysMissions = identityOperationsRepository.listTodayMissions(todaysDate);
     setMissions(todaysMissions);
@@ -45,6 +64,8 @@ export default function IdentityOperationsBoard({ todaysDate }: Props) {
 
   useEffect(() => {
     loadData();
+    window.addEventListener("batcave-ops-updated", loadData);
+    return () => window.removeEventListener("batcave-ops-updated", loadData);
   }, [loadData]);
 
   // Live timer tick for active operations
@@ -105,6 +126,38 @@ export default function IdentityOperationsBoard({ todaysDate }: Props) {
     loadData();
   };
 
+  const handleReportViolation = (resId: string) => {
+    const res = restrictions.find(r => r.id === resId);
+    if (!res) return;
+    
+    if (res.askReasonWhenBroken) {
+      audioManager.playClick();
+      setViolationResId(resId);
+      setSkipReason(""); // Reusing skipReason state for violation reason
+      setSkipError(false);
+    } else {
+      audioManager.playClick();
+      identityOperationsRepository.logRestrictionViolation(resId, todaysDate);
+      loadData();
+    }
+  };
+
+  const submitViolation = () => {
+    if (!skipReason.trim()) {
+      setSkipError(true);
+      return;
+    }
+    if (!violationResId) return;
+
+    audioManager.playClick();
+    identityOperationsRepository.logRestrictionViolation(violationResId, todaysDate, skipReason.trim());
+    
+    setViolationResId(null);
+    setSkipReason("");
+    setSkipError(false);
+    loadData();
+  };
+
   // Actions for Today's Missions
   const handleCompleteMission = (missionId: string) => {
     audioManager.playCheckinComplete();
@@ -123,15 +176,33 @@ export default function IdentityOperationsBoard({ todaysDate }: Props) {
     e.preventDefault();
     if (!newTaskName.trim()) return;
     
-    if (addType === "permanent") {
-      identityOperationsRepository.createOperation(newTaskName.trim(), newOpDesc.trim() || undefined, identity, newOpGoal.trim() || undefined);
+    if (addType === "operation") {
+      identityOperationsRepository.createOperation(
+        newTaskName.trim(), 
+        newOpDesc.trim() || undefined, 
+        identity, 
+        undefined, // dailyGoal
+        newOpIsOptional, 
+        newOpFocusEligible
+      );
     } else {
-      identityOperationsRepository.createTodayMission(newTaskName.trim(), identity);
+      identityOperationsRepository.createRestriction(
+        newTaskName.trim(), 
+        newOpDesc.trim() || undefined, 
+        identity, 
+        newResSeverity, 
+        newResTrackDaily, 
+        newResAskReason
+      );
     }
     
     setNewTaskName("");
     setNewOpDesc("");
-    setNewOpGoal("");
+    setNewOpIsOptional(false);
+    setNewOpFocusEligible(true);
+    setNewResSeverity("Medium");
+    setNewResTrackDaily(true);
+    setNewResAskReason(false);
     setActiveAddIdentity(null);
     loadData();
   };
@@ -169,6 +240,7 @@ export default function IdentityOperationsBoard({ todaysDate }: Props) {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {identities.map((identity) => {
           const idOps = operations.filter(o => o.identity === identity);
+          const idRes = restrictions.filter(r => r.identity === identity);
           const idMissions = missions.filter(m => m.identity === identity);
           const { score, status } = identityOperationsRepository.getIdentityScore(identity, todaysDate);
           
@@ -218,46 +290,75 @@ export default function IdentityOperationsBoard({ todaysDate }: Props) {
                     <form onSubmit={(e) => handleCreateTask(e, identity)} className="p-4 flex flex-col gap-3">
                       <div className="flex gap-4">
                         <label className="flex items-center gap-2 cursor-pointer font-mono text-[10px] text-white/60 uppercase">
-                          <input type="radio" checked={addType === "mission"} onChange={() => setAddType("mission")} className="accent-amber-400" />
-                          Today's Mission
+                          <input type="radio" checked={addType === "operation"} onChange={() => setAddType("operation")} className="accent-amber-400" />
+                          Operation
                         </label>
                         <label className="flex items-center gap-2 cursor-pointer font-mono text-[10px] text-white/60 uppercase">
-                          <input type="radio" checked={addType === "permanent"} onChange={() => setAddType("permanent")} className="accent-amber-400" />
-                          Permanent Op
+                          <input type="radio" checked={addType === "restriction"} onChange={() => setAddType("restriction")} className="accent-amber-400" />
+                          Restriction
                         </label>
                       </div>
 
                       <input
                         type="text"
-                        placeholder="Task Name"
+                        placeholder={`${addType === "operation" ? "Operation" : "Restriction"} Name`}
                         value={newTaskName}
                         onChange={(e) => setNewTaskName(e.target.value)}
                         autoFocus
                         className="w-full bg-black/50 border border-white/10 px-3 py-2 font-mono text-xs text-white outline-none focus:border-amber-400/50"
                       />
+                      
+                      <input
+                        type="text"
+                        placeholder="Description (Optional)"
+                        value={newOpDesc}
+                        onChange={(e) => setNewOpDesc(e.target.value)}
+                        className="w-full bg-black/50 border border-white/10 px-3 py-2 font-mono text-xs text-white outline-none focus:border-amber-400/50"
+                      />
 
-                      {addType === "permanent" && (
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            placeholder="Description (Optional)"
-                            value={newOpDesc}
-                            onChange={(e) => setNewOpDesc(e.target.value)}
-                            className="flex-1 bg-black/50 border border-white/10 px-3 py-2 font-mono text-xs text-white outline-none focus:border-amber-400/50"
-                          />
-                          <input
-                            type="text"
-                            placeholder="Daily Goal (e.g. 2 Sessions)"
-                            value={newOpGoal}
-                            onChange={(e) => setNewOpGoal(e.target.value)}
-                            className="flex-1 bg-black/50 border border-white/10 px-3 py-2 font-mono text-xs text-white outline-none focus:border-amber-400/50"
-                          />
+                      {addType === "operation" && (
+                        <div className="flex gap-4">
+                          <label className="flex items-center gap-2 cursor-pointer font-mono text-[10px] text-white/60 uppercase">
+                            <input type="checkbox" checked={!newOpIsOptional} onChange={(e) => setNewOpIsOptional(!e.target.checked)} className="accent-amber-400" />
+                            Daily Required
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer font-mono text-[10px] text-white/60 uppercase">
+                            <input type="checkbox" checked={newOpFocusEligible} onChange={(e) => setNewOpFocusEligible(e.target.checked)} className="accent-amber-400" />
+                            Focus Timer Eligible
+                          </label>
+                        </div>
+                      )}
+
+                      {addType === "restriction" && (
+                        <div className="flex flex-col gap-3">
+                          <div>
+                            <label className="font-mono text-[9px] uppercase tracking-widest text-white/40 block mb-1">Severity</label>
+                            <select
+                              value={newResSeverity}
+                              onChange={(e) => setNewResSeverity(e.target.value as RestrictionSeverity)}
+                              className="w-full bg-black/50 border border-white/10 px-3 py-2 font-mono text-xs text-white outline-none focus:border-amber-400/50"
+                            >
+                              <option value="Low">Low</option>
+                              <option value="Medium">Medium</option>
+                              <option value="High">High</option>
+                            </select>
+                          </div>
+                          <div className="flex gap-4">
+                            <label className="flex items-center gap-2 cursor-pointer font-mono text-[10px] text-white/60 uppercase">
+                              <input type="checkbox" checked={newResTrackDaily} onChange={(e) => setNewResTrackDaily(e.target.checked)} className="accent-amber-400" />
+                              Track Daily
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer font-mono text-[10px] text-white/60 uppercase">
+                              <input type="checkbox" checked={newResAskReason} onChange={(e) => setNewResAskReason(e.target.checked)} className="accent-amber-400" />
+                              Ask Reason When Broken
+                            </label>
+                          </div>
                         </div>
                       )}
 
                       <div className="flex justify-end mt-2">
                         <button type="submit" className="px-4 py-2 bg-white/5 border border-white/10 font-mono text-[10px] uppercase tracking-widest text-white hover:bg-white/10 transition-colors">
-                          Deploy Task
+                          Deploy {addType === "operation" ? "Operation" : "Restriction"}
                         </button>
                       </div>
                     </form>
@@ -298,13 +399,13 @@ export default function IdentityOperationsBoard({ todaysDate }: Props) {
                   )}
                 </div>
 
-                {/* Permanent Operations */}
+                {/* Operations */}
                 <div>
                   <h4 className="font-mono text-[9px] uppercase tracking-widest text-white/30 mb-3 border-b border-white/5 pb-1">
-                    Permanent Operations
+                    Operations
                   </h4>
                   {idOps.length === 0 ? (
-                    <p className="font-mono text-[10px] text-white/20 italic">No permanent operations defined.</p>
+                    <p className="font-mono text-[10px] text-white/20 italic">No operations defined.</p>
                   ) : (
                     <div className="flex flex-col gap-2">
                       {idOps.map((op) => {
@@ -332,6 +433,15 @@ export default function IdentityOperationsBoard({ todaysDate }: Props) {
                                 <h5 className={`font-mono text-xs uppercase ${status === "completed" || status === "skipped" ? "line-through" : "text-white/90"}`}>
                                   {op.name}
                                 </h5>
+                                {op.isOptional ? (
+                                  <p className="font-mono text-[9px] text-white/50 mt-1 uppercase tracking-widest">
+                                    OPTIONAL
+                                  </p>
+                                ) : (
+                                  <p className="font-mono text-[9px] text-amber-400 mt-1 uppercase tracking-widest">
+                                    DAILY
+                                  </p>
+                                )}
                                 {op.dailyGoal && (
                                   <p className="font-mono text-[9px] text-frost/80 mt-1 uppercase tracking-widest">
                                     GOAL: {op.dailyGoal}
@@ -355,6 +465,50 @@ export default function IdentityOperationsBoard({ todaysDate }: Props) {
 
                                 {(status === "pending" || status === "active") && (
                                   <button onClick={() => handleSetOpStatus(op.id, "skipped")} className="font-mono text-[9px] uppercase px-2 py-1 text-white/30 hover:text-red-400 hover:border-red-400/30 border border-white/10 transition-colors">Skip</button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Restrictions */}
+                <div>
+                  <h4 className="font-mono text-[9px] uppercase tracking-widest text-white/30 mb-3 border-b border-white/5 pb-1">
+                    Restrictions
+                  </h4>
+                  {idRes.length === 0 ? (
+                    <p className="font-mono text-[10px] text-white/20 italic">No restrictions defined.</p>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      {idRes.map((res) => {
+                        const log = restrictionLogs.find(l => l.restrictionId === res.id);
+                        const isViolated = log?.status === "violated";
+                        
+                        return (
+                          <div key={res.id} className={`flex flex-col p-3 border ${isViolated ? 'bg-red-500/10 border-red-500/30' : 'bg-black/30 border-white/5'} transition-colors relative`}>
+                            {isViolated && <div className="absolute left-0 top-0 bottom-0 w-1 bg-red-500" />}
+
+                            <div className="flex justify-between items-start gap-4">
+                              <div className="flex-1">
+                                <h5 className={`font-mono text-xs uppercase ${isViolated ? 'text-red-400' : 'text-white/90'}`}>
+                                  {res.name}
+                                </h5>
+                                <div className="flex gap-2 mt-1">
+                                  <p className={`font-mono text-[9px] uppercase tracking-widest ${isViolated ? 'text-red-400/80' : 'text-emerald-400/80'}`}>
+                                    STATUS: {isViolated ? 'VIOLATED' : 'PROTECTED'}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="flex gap-2 shrink-0">
+                                {!isViolated && (
+                                  <button onClick={() => handleReportViolation(res.id)} className="font-mono text-[9px] uppercase px-2 py-1 text-white/30 hover:text-red-400 hover:border-red-400/30 border border-white/10 transition-colors">
+                                    Report Violation
+                                  </button>
                                 )}
                               </div>
                             </div>
@@ -392,7 +546,7 @@ export default function IdentityOperationsBoard({ todaysDate }: Props) {
 
       {/* Accountability Modal */}
       <AnimatePresence>
-        {skipOpId && (
+        {(skipOpId || violationResId) && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -411,7 +565,7 @@ export default function IdentityOperationsBoard({ todaysDate }: Props) {
                 Accountability Protocol
               </h3>
               <p className="font-mono text-[10px] uppercase text-red-400/60 mb-6 tracking-widest pl-2">
-                Why was this operation skipped today?
+                {skipOpId ? "Why was this operation skipped today?" : "Why was this restriction violated?"}
               </p>
 
               <div className="pl-2">
@@ -439,6 +593,7 @@ export default function IdentityOperationsBoard({ todaysDate }: Props) {
                     onClick={() => {
                       audioManager.playClick();
                       setSkipOpId(null);
+                      setViolationResId(null);
                       setSkipReason("");
                       setSkipError(false);
                     }}
@@ -447,10 +602,10 @@ export default function IdentityOperationsBoard({ todaysDate }: Props) {
                     Cancel
                   </button>
                   <button
-                    onClick={submitSkip}
+                    onClick={skipOpId ? submitSkip : submitViolation}
                     className="px-5 py-2 font-mono text-[10px] uppercase bg-red-500/10 border border-red-500/50 text-red-400 hover:bg-red-500/20 transition-colors shadow-[0_0_15px_rgba(239,68,68,0.2)]"
                   >
-                    Confirm Skip
+                    Confirm {skipOpId ? "Skip" : "Violation"}
                   </button>
                 </div>
               </div>

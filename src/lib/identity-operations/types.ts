@@ -9,6 +9,8 @@ export interface PermanentOperation {
   archived: boolean;
   createdAt: string;
   dailyGoal?: string; // Optional user-defined goal (e.g. "2 Focus Sessions")
+  isOptional?: boolean; // Replaces Daily/Optional. If false or undefined, it's a daily active task.
+  focusTimerEligible?: boolean; // Determines if it appears in Focus Timer. Default true.
 }
 
 export type OperationStatus = "pending" | "active" | "completed" | "skipped" | "missed";
@@ -46,4 +48,27 @@ export interface TaskHistoryRecord {
   skipReason?: string;
   completionSource: "Manual" | "Focus Timer" | "Future Automation";
   taskType: "PermanentOperation" | "TodayMission";
+}
+
+export type RestrictionSeverity = "Low" | "Medium" | "High";
+
+export interface Restriction {
+  id: string;
+  name: string;
+  description?: string;
+  identity: ProtocolIdentity;
+  severity: RestrictionSeverity;
+  trackDaily: boolean;
+  askReasonWhenBroken: boolean;
+  createdAt: string;
+  archived: boolean;
+}
+
+export interface RestrictionLog {
+  id: string;
+  restrictionId: string;
+  date: string; // YYYY-MM-DD
+  status: "protected" | "violated";
+  violationReason?: string;
+  violationTime?: string; // ISO datetime
 }
