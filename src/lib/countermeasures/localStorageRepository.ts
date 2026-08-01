@@ -17,7 +17,11 @@ function readJson<T>(key: string, fallback: T): T {
   }
 
   const rawValue = window.localStorage.getItem(key);
-  return rawValue ? (JSON.parse(rawValue) as T) : fallback;
+  try {
+    return rawValue ? (JSON.parse(rawValue) as T) : fallback;
+  } catch (e) {
+    return fallback;
+  }
 }
 
 function writeJson<T>(key: string, value: T) {

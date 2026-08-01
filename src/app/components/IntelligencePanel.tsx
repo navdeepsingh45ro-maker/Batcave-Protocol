@@ -24,7 +24,6 @@ import ExecutionIntelligenceEngine from "./ExecutionIntelligenceEngine";
 
 interface IntelligencePanelProps {
   todaysDate: ISODate;
-  refreshKey: number;
 }
 
 function formatDateLabel(dateStr: string): string {
@@ -91,7 +90,7 @@ function classStyle(t: string | null | undefined) {
   return CLASS_STYLES[t ?? ""] ?? { text: "text-white/30", border: "border-white/5", bg: "bg-transparent", label: "—" };
 }
 
-export default function IntelligencePanel({ todaysDate, refreshKey }: IntelligencePanelProps) {
+export default function IntelligencePanel({ todaysDate }: IntelligencePanelProps) {
   // ── Rolling 7 days ────────────────────────────────────────────
   const dates = useMemo(() => {
     const arr: ISODate[] = [];
@@ -100,15 +99,9 @@ export default function IntelligencePanel({ todaysDate, refreshKey }: Intelligen
   }, [todaysDate]);
 
   // ── Data loads ────────────────────────────────────────────────
-  const activities = useMemo(() => localFoundationRepository.listFoundationActivities(),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [refreshKey]);
-  const beliefs = useMemo(() => beliefRepo.list(),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [refreshKey]);
-  const countermeasureLogs = useMemo(() => localCountermeasureRepository.listLogs(),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [refreshKey]);
+  const activities = useMemo(() => localFoundationRepository.listFoundationActivities(), []);
+  const beliefs = useMemo(() => beliefRepo.list(), []);
+  const countermeasureLogs = useMemo(() => localCountermeasureRepository.listLogs(), []);
 
 
 
@@ -305,8 +298,7 @@ export default function IntelligencePanel({ todaysDate, refreshKey }: Intelligen
     const decisions = decisionRepo.list();
     const usages    = decisionUsageRepo.list();
     return generateBeliefTransformations(decisions, usages);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refreshKey]);
+  }, []);
 
   // ── Pattern Report ─────────────────────────────────────────────
   const patternReport = useMemo(() => generatePatternReport(beliefs), [beliefs]);

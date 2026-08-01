@@ -7,10 +7,10 @@ import StatePanel from "./StatePanel";
 import DecisionMetricsPanel from "./DecisionMetricsPanel";
 import CommandCenter from "./CommandCenter";
 import ProtocolDispatch from "./ProtocolDispatch";
-import IntelligencePanel from "./IntelligencePanel";
-import DataVaultPanel from "./DataVaultPanel";
-import DailyTransmission from "./DailyTransmission";
-import DailyMission from "./DailyMission";
+import dynamic from 'next/dynamic';
+
+const IntelligencePanel = dynamic(() => import('./IntelligencePanel'), { ssr: false });
+const DataVaultPanel = dynamic(() => import('./DataVaultPanel'), { ssr: false });
 import IdentityOperationsBoard from "./IdentityOperationsBoard";
 import AccountabilityEngine from "./AccountabilityEngine";
 import FocusTimer from "./FocusTimer";
@@ -95,72 +95,6 @@ export default function Dashboard() {
   const [activeDateStateLogs, setActiveDateStateLogs] = useState<DailyStateLog[]>([]);
   const [latestStateLog, setLatestStateLog] = useState<DailyStateLog | null>(null);
 
-  // Countermeasure recommendation replaced by ProtocolEngine
-
-  const handleFoundationLogged = useCallback(() => {
-    setRefreshKey((k) => k + 1);
-  }, []);
-
-  // Unified Foundation Resources loaded at parent
-  const activities = useMemo(() => {
-    return localFoundationRepository.listActivities();
-  }, [refreshKey]);
-
-  const activityLogs = useMemo(() => {
-    return localFoundationRepository.listActivityLogs();
-  }, [refreshKey]);
-
-  const constraintStatus = useMemo(() => {
-    const constraintLogs = localFoundationRepository.listConstraintLogs();
-    const todayConstraint = constraintLogs.find(
-      (log) => log.date === activeDate && log.constraint === "No Porn"
-    );
-    if (!todayConstraint) return "PENDING" as const;
-    if (todayConstraint.subtype === "Yes" && todayConstraint.completed) return "CLEAN" as const;
-    if (todayConstraint.subtype === "No") return "FAILED" as const;
-    return "PENDING" as const;
-  }, [refreshKey, activeDate]);
-
-  // Normal mode day log persistence
-  const handleUpdateDayLog = useCallback(
-    (updates: Partial<DayLog>) => {
-      const existingMockLogs = typeof window !== "undefined" ? JSON.parse(window.localStorage.getItem("batcave.normal.dayLogs") || "[]") : [];
-      const existing = existingMockLogs.find((l: any) => l.date === activeDate) || { date: activeDate, manualStatuses: {}, builderGoal: "", athleteLocation: "Home" };
-      const merged = {
-        ...existing,
-        ...updates,
-        manualStatuses: {
-          ...(existing.manualStatuses ?? {}),
-          ...(updates.manualStatuses ?? {}),
-        },
-        updatedAt: new Date().toISOString(),
-      };
-      const nextMockLogs = [
-        ...existingMockLogs.filter((l: any) => l.date !== activeDate),
-        merged,
-      ];
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem("batcave.normal.dayLogs", JSON.stringify(nextMockLogs));
-      }
-      setRefreshKey((k) => k + 1);
-    },
-    [activeDate]
-  );
-
-  // Normal Mode day log resolver
-  const activeDayLog = useMemo(() => {
-    const existingMockLogs = typeof window !== "undefined" ? JSON.parse(window.localStorage.getItem("batcave.normal.dayLogs") || "[]") : [];
-    return existingMockLogs.find((l: any) => l.date === activeDate) || {
-      date: activeDate,
-      manualStatuses: {},
-      builderGoal: "",
-      athleteLocation: "Home",
-      athleteDrills: [],
-      anchorTasks: [],
-      cardStates: [],
-    };
-  }, [activeDate, refreshKey]);
-
   // Initialize audio state from local storage on mount
   useEffect(() => {
     setAudioMuted(audioManager.getMuted());
@@ -209,23 +143,10 @@ export default function Dashboard() {
     [refreshStateLogs]
   );
 
-  const handleCountermeasureActioned = useCallback(() => {
-    setRefreshKey((k) => k + 1);
-  }, []);
-
   const handleSetOffset = useCallback((offset: number) => {
     audioManager.playClick();
     setOffsetDays(offset);
   }, []);
-
-  // Bottom action visibility:
-  const [userExpandedIntelligence, setUserExpandedIntelligence] = useState(false);
-
-  const autoExpandIntelligence = useMemo(() => {
-    return latestStateLog !== null && latestStateLog.riskScore >= 10;
-  }, [latestStateLog]);
-
-  const showIntelligence = userExpandedIntelligence || autoExpandIntelligence;
 
   return (
     <>
@@ -435,14 +356,7 @@ export default function Dashboard() {
                   transition={{ duration: 0.4 }}
                   className="space-y-3"
                 >
-                  {/* ───────────────── TOP ZONE ───────────────── */}
                   <div className="space-y-6 w-full">
-                    {offsetDays === 0 && (
-                      <DailyTransmission
-                        todaysDate={todaysDate}
-                        dominantState={latestStateLog?.selectedStates?.[0] ?? null}
-                      />
-                    )}
                     
                     {/* Neural Check-In (Mandatory) */}
                     <StatePanel 
@@ -453,9 +367,6 @@ export default function Dashboard() {
                     {/* Block downstream execution until checked in */}
                     {latestStateLog ? (
                       <div className="space-y-6 animate-fade-in pt-4">
-                        {/* Mission Input */}
-                        <DailyMission todaysDate={activeDate} />
-
                         {/* Intelligent Protocols (Hidden unless triggered) */}
                         <ProtocolDispatch />
 
@@ -488,7 +399,6 @@ export default function Dashboard() {
                 >
                   <IntelligencePanel
                     todaysDate={todaysDate}
-                    refreshKey={refreshKey}
                   />
                 </motion.div>
               ) : (
