@@ -13,7 +13,7 @@ export interface PermanentOperation {
   focusTimerEligible?: boolean; // Determines if it appears in Focus Timer. Default true.
 }
 
-export type OperationStatus = "pending" | "active" | "completed" | "skipped" | "missed";
+export type OperationStatus = "pending" | "completed" | "skipped" | "missed";
 
 // Tracks daily progress for Permanent Operations (preserves backward compatibility)
 export interface OperationLog {
@@ -21,11 +21,10 @@ export interface OperationLog {
   operationId: string;
   date: string; // YYYY-MM-DD
   status: OperationStatus;
-  startedAt?: string; // ISO datetime string of first start
   completedAt?: string; // ISO datetime string of completion
-  lastResumedAt?: string; // ISO datetime string, tracks current active session
-  durationMs: number; // Accumulated duration in ms
+  durationMs: number; // User-defined duration in ms
   skipReason?: string;
+  notes?: string;
 }
 
 export interface TodayMission {

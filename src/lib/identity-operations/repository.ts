@@ -210,7 +210,9 @@ class IdentityOperationsRepository {
     logId: string, 
     status: OperationStatus, 
     skipReason?: string,
-    source: "Manual" | "Focus Timer" | "Future Automation" = "Manual"
+    source: "Manual" | "Focus Timer" | "Future Automation" = "Manual",
+    durationMs?: number,
+    notes?: string
   ): OperationLog | null {
     if (!this.isClient) return null;
     let allLogs: OperationLog[] = [];
@@ -224,22 +226,11 @@ class IdentityOperationsRepository {
 
     const log = allLogs[idx];
     const now = new Date().toISOString();
-    let newDuration = log.durationMs;
-    let newStartedAt = log.startedAt;
+    
+    // Default to the previous duration if none provided
+    const finalDuration = durationMs !== undefined ? durationMs : log.durationMs;
+
     let newCompletedAt = log.completedAt;
-    let newLastResumedAt = log.lastResumedAt;
-
-    if (log.status === "active" && status !== "active" && log.lastResumedAt) {
-      const elapsed = new Date(now).getTime() - new Date(log.lastResumedAt).getTime();
-      newDuration += Math.max(0, elapsed);
-      newLastResumedAt = undefined;
-    }
-
-    if (status === "active") {
-      if (!newStartedAt) newStartedAt = now;
-      newLastResumedAt = now;
-    }
-
     if (status === "completed" || status === "skipped" || status === "missed") {
       if (!newCompletedAt) newCompletedAt = now;
       
@@ -250,30 +241,25 @@ class IdentityOperationsRepository {
           taskName: op.name,
           identity: op.identity,
           date: log.date,
-          startedAt: newStartedAt,
           completedAt: newCompletedAt,
-          durationMs: newDuration,
+          durationMs: finalDuration,
           skipReason,
           completionSource: source,
           taskType: "PermanentOperation"
         });
       }
+    } else if (status === "pending") {
+      newCompletedAt = undefined;
     }
 
-    if (status === "pending") {
-      newLastResumedAt = undefined;
-    }
-
-    allLogs[idx] = {
-      ...log,
-      status,
-      durationMs: newDuration,
-      startedAt: newStartedAt,
+    allLogs[idx] = { 
+      ...log, 
+      status, 
       completedAt: newCompletedAt,
-      lastResumedAt: newLastResumedAt,
-      ...(skipReason !== undefined ? { skipReason } : {}),
+      durationMs: finalDuration,
+      skipReason: skipReason || log.skipReason,
+      notes: notes || log.notes
     };
-
     this.saveLogs(allLogs);
     return allLogs[idx];
   }
@@ -426,7 +412,7 @@ class IdentityOperationsRepository {
     
     ops.forEach(op => {
       const log = logs.find(l => l.operationId === op.id);
-      if (!log || log.status === "pending" || log.status === "active") {
+      if (!log || log.status === "pending" || (log.status as string) === "active") {
         unfinished.push({
           id: op.id,
           name: op.name,

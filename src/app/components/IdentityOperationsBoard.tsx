@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { identityOperationsRepository, PermanentOperation, OperationLog, OperationStatus, ProtocolIdentity, TodayMission, TaskHistoryRecord, Restriction, RestrictionLog, RestrictionSeverity } from "@/lib/identity-operations";
+import { focusSessionRepository, FocusSession } from "@/lib/focus-sessions";
 import { audioManager } from "@/lib/audioManager";
 import type { ISODate } from "@/lib/foundation/types";
 
@@ -17,11 +18,18 @@ export default function IdentityOperationsBoard({ todaysDate }: Props) {
   const [restrictionLogs, setRestrictionLogs] = useState<RestrictionLog[]>([]);
   const [missions, setMissions] = useState<TodayMission[]>([]);
   const [history, setHistory] = useState<TaskHistoryRecord[]>([]);
+  const [sessions, setSessions] = useState<FocusSession[]>([]);
   
   // Skip Modal states
   const [skipOpId, setSkipOpId] = useState<string | null>(null);
   const [skipReason, setSkipReason] = useState("");
   const [skipError, setSkipError] = useState(false);
+
+  // Completion Modal states
+  const [completeOpId, setCompleteOpId] = useState<string | null>(null);
+  const [completeHours, setCompleteHours] = useState("");
+  const [completeMinutes, setCompleteMinutes] = useState("");
+  const [completeNotes, setCompleteNotes] = useState("");
   
   // Violation Modal state (reuses skipReason)
   const [violationResId, setViolationResId] = useState<string | null>(null);
@@ -60,6 +68,9 @@ export default function IdentityOperationsBoard({ todaysDate }: Props) {
 
     const recentHistory = identityOperationsRepository.listHistory(50);
     setHistory(recentHistory);
+    
+    const todaysSessions = focusSessionRepository.listSessions().filter(s => s.date === todaysDate);
+    setSessions(todaysSessions);
   }, [todaysDate]);
 
   useEffect(() => {
@@ -67,15 +78,6 @@ export default function IdentityOperationsBoard({ todaysDate }: Props) {
     window.addEventListener("batcave-ops-updated", loadData);
     return () => window.removeEventListener("batcave-ops-updated", loadData);
   }, [loadData]);
-
-  // Live timer tick for active operations
-  const [nowMs, setNowMs] = useState(Date.now());
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setNowMs(Date.now());
-    }, 1000);
-    return () => clearInterval(interval);
-  }, []);
 
   // Actions for Permanent Operations
   const getLogForOp = (opId: string) => {
@@ -96,17 +98,37 @@ export default function IdentityOperationsBoard({ todaysDate }: Props) {
       return;
     }
 
+    if (status === "completed") {
+      audioManager.playClick();
+      setCompleteOpId(opId);
+      setCompleteHours("");
+      setCompleteMinutes("");
+      setCompleteNotes("");
+      return;
+    }
+
     audioManager.playClick();
     const log = getLogForOp(opId);
-    
     identityOperationsRepository.updateLogStatus(log.id, status, undefined, "Manual");
     loadData();
+  };
+
+  const submitComplete = () => {
+    if (!completeOpId) return;
+    audioManager.playCheckinComplete();
+    const log = getLogForOp(completeOpId);
     
-    if (status === "completed") {
-      audioManager.playCheckinComplete();
-    } else if (status === "active") {
-      audioManager.playToggle();
-    }
+    const hrs = parseInt(completeHours) || 0;
+    const mins = parseInt(completeMinutes) || 0;
+    const durationMs = (hrs * 3600 + mins * 60) * 1000;
+    
+    identityOperationsRepository.updateLogStatus(log.id, "completed", undefined, "Manual", durationMs, completeNotes.trim());
+    
+    setCompleteOpId(null);
+    setCompleteHours("");
+    setCompleteMinutes("");
+    setCompleteNotes("");
+    loadData();
   };
 
   const submitSkip = () => {
@@ -411,21 +433,14 @@ export default function IdentityOperationsBoard({ todaysDate }: Props) {
                       {idOps.map((op) => {
                         const log = getLogForOp(op.id);
                         const status = log?.status || "pending";
-                        
-                        let currentDuration = log?.durationMs || 0;
-                        if (status === "active" && log?.lastResumedAt) {
-                          const elapsed = Math.max(0, nowMs - new Date(log.lastResumedAt).getTime());
-                          currentDuration += elapsed;
-                        }
+                        const linkedSessions = sessions.filter(s => s.linkedTaskId === op.id);
 
                         let statusColor = "bg-black/30 text-white/40 border-white/5";
-                        if (status === "active") statusColor = "bg-amber-400/5 text-amber-400 border-amber-400/20";
-                        else if (status === "completed") statusColor = "bg-emerald-500/5 text-emerald-400 border-emerald-500/20 opacity-60";
+                        if (status === "completed") statusColor = "bg-emerald-500/5 text-emerald-400 border-emerald-500/20 opacity-60";
                         else if (status === "skipped") statusColor = "bg-red-500/5 text-red-500/60 border-red-500/20 opacity-60";
 
                         return (
                           <div key={op.id} className={`flex flex-col p-3 border transition-colors relative ${statusColor}`}>
-                            {status === "active" && <div className="absolute left-0 top-0 bottom-0 w-1 bg-amber-400 animate-pulse" />}
                             {status === "completed" && <div className="absolute left-0 top-0 bottom-0 w-1 bg-emerald-500" />}
 
                             <div className="flex justify-between items-start gap-4">
@@ -447,23 +462,26 @@ export default function IdentityOperationsBoard({ todaysDate }: Props) {
                                     GOAL: {op.dailyGoal}
                                   </p>
                                 )}
-                                {status === "active" && currentDuration > 0 && (
-                                  <p className="font-mono text-[9px] text-amber-400 mt-1 uppercase">
-                                    ELAPSED: {formatDuration(currentDuration)}
+                                {linkedSessions.length > 0 && (
+                                  <p className="font-mono text-[9px] text-emerald-400/80 mt-1 uppercase tracking-widest flex items-center gap-1">
+                                    <span className="text-emerald-500">✓</span> {linkedSessions.length} Focus Session{linkedSessions.length > 1 ? 's' : ''} Linked
                                   </p>
                                 )}
+                                {status === "completed" && log?.durationMs ? (
+                                  <p className="font-mono text-[9px] text-emerald-400/60 mt-1 uppercase">
+                                    DURATION: {Math.floor(log.durationMs / 3600000)}H {Math.floor((log.durationMs % 3600000) / 60000)}M
+                                  </p>
+                                ) : null}
                               </div>
 
                               <div className="flex gap-2 shrink-0">
                                 {status === "pending" || status === "skipped" ? (
-                                  <button onClick={() => handleSetOpStatus(op.id, "active")} className="font-mono text-[9px] uppercase px-2 py-1 text-amber-400 hover:bg-amber-400/10 border border-amber-400/30 transition-colors">Start</button>
-                                ) : status === "active" ? (
                                   <button onClick={() => handleSetOpStatus(op.id, "completed")} className="font-mono text-[9px] uppercase px-2 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20 transition-colors">Complete</button>
                                 ) : status === "completed" ? (
                                   <button onClick={() => handleSetOpStatus(op.id, "pending")} className="font-mono text-[9px] uppercase px-2 py-1 text-white/30 hover:text-white/60 border border-white/10 transition-colors">Reset</button>
                                 ) : null}
 
-                                {(status === "pending" || status === "active") && (
+                                {status === "pending" && (
                                   <button onClick={() => handleSetOpStatus(op.id, "skipped")} className="font-mono text-[9px] uppercase px-2 py-1 text-white/30 hover:text-red-400 hover:border-red-400/30 border border-white/10 transition-colors">Skip</button>
                                 )}
                               </div>
@@ -606,6 +624,95 @@ export default function IdentityOperationsBoard({ todaysDate }: Props) {
                     className="px-5 py-2 font-mono text-[10px] uppercase bg-red-500/10 border border-red-500/50 text-red-400 hover:bg-red-500/20 transition-colors shadow-[0_0_15px_rgba(239,68,68,0.2)]"
                   >
                     Confirm {skipOpId ? "Skip" : "Violation"}
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Completion Modal */}
+      <AnimatePresence>
+        {completeOpId && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 10 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 10 }}
+              className="bg-black border border-emerald-500/30 p-6 max-w-md w-full shadow-[0_0_40px_rgba(16,185,129,0.15)] relative overflow-hidden"
+            >
+              <div className="absolute left-0 top-0 bottom-0 w-1 bg-emerald-500/50" />
+              
+              <h3 className="font-display text-xl uppercase tracking-wider text-emerald-500 mb-1 pl-2">
+                Completion Protocol
+              </h3>
+              <p className="font-mono text-[10px] uppercase text-emerald-400/60 mb-6 tracking-widest pl-2">
+                Log operation duration and notes.
+              </p>
+
+              <div className="pl-2 space-y-4">
+                <div className="flex gap-4">
+                  <div className="flex-1">
+                    <label className="font-mono text-[9px] uppercase tracking-widest text-white/40 block mb-2">Hours</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={completeHours}
+                      onChange={(e) => setCompleteHours(e.target.value)}
+                      className="w-full bg-black/50 border border-white/10 p-3 text-white font-mono text-xs outline-none focus:border-emerald-500/50 transition-all"
+                      placeholder="0"
+                      autoFocus
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label className="font-mono text-[9px] uppercase tracking-widest text-white/40 block mb-2">Minutes</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="59"
+                      value={completeMinutes}
+                      onChange={(e) => setCompleteMinutes(e.target.value)}
+                      className="w-full bg-black/50 border border-white/10 p-3 text-white font-mono text-xs outline-none focus:border-emerald-500/50 transition-all"
+                      placeholder="0"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="font-mono text-[9px] uppercase tracking-widest text-white/40 block mb-2">Quick Note (Optional)</label>
+                  <input
+                    type="text"
+                    value={completeNotes}
+                    onChange={(e) => setCompleteNotes(e.target.value)}
+                    className="w-full bg-black/50 border border-white/10 p-3 text-white font-mono text-xs outline-none focus:border-emerald-500/50 transition-all"
+                    placeholder="E.g. Finished after evening training."
+                  />
+                </div>
+
+                <div className="flex justify-end gap-3 mt-4">
+                  <button
+                    onClick={() => {
+                      audioManager.playClick();
+                      setCompleteOpId(null);
+                      setCompleteHours("");
+                      setCompleteMinutes("");
+                      setCompleteNotes("");
+                    }}
+                    className="px-4 py-2 font-mono text-[10px] uppercase text-white/40 hover:text-white transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={submitComplete}
+                    className="px-5 py-2 font-mono text-[10px] uppercase bg-emerald-500/10 border border-emerald-500/50 text-emerald-400 hover:bg-emerald-500/20 transition-colors shadow-[0_0_15px_rgba(16,185,129,0.2)]"
+                  >
+                    Confirm Completion
                   </button>
                 </div>
               </div>

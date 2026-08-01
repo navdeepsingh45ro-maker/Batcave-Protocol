@@ -173,14 +173,8 @@ export default function FocusTimer({ todaysDate }: Props) {
       timerLength: initialTime,
     });
 
-    if (linkedTaskId && objectiveStatus === "Mission Complete") {
-      if (linkedTaskType === "PermanentOperation") {
-        const log = identityOperationsRepository.getOrCreateLog(linkedTaskId, todaysDate);
-        identityOperationsRepository.updateLogStatus(log.id, "completed", undefined, "Focus Timer");
-      } else if (linkedTaskType === "TodayMission") {
-        identityOperationsRepository.updateTodayMission(linkedTaskId, { status: "completed" }, todaysDate, "Focus Timer");
-      }
-    }
+    // Focus Sessions purely log analytics and optionally link to a task.
+    // We no longer automatically update the task's completion status.
 
     setLastLoggedSummary({
       duration: durationSec,
