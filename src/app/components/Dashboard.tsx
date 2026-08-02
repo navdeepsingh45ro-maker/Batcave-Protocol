@@ -361,7 +361,7 @@ export default function Dashboard() {
                     {/* Neural Check-In (Mandatory) */}
                     <StatePanel 
                       todaysDate={activeDate}
-                      onStateCheckedIn={() => setRefreshKey(k => k + 1)}
+                      onStateCheckedIn={handleStateCheckedIn}
                     />
 
                     {/* Block downstream execution until checked in */}

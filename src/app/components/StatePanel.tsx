@@ -49,7 +49,7 @@ export default function StatePanel({ todaysDate, onStateCheckedIn }: StatePanelP
       setIsCollapsed(false);
       setStep(1);
     }
-  }, [logs]);
+  }, [logs.length]);
 
   const handleStateSelect = (state: BeliefState) => {
     audioManager.playClick();
